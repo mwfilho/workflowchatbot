@@ -1,0 +1,871 @@
+{
+  "name": "SUB-WORKFLOW 2 - Consultar Processo",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "numeroProcesso"
+            },
+            {
+              "name": "fonte"
+            }
+          ]
+        }
+      },
+      "id": "c055762a-8fe7-4141-a639-df2372f30060",
+      "typeVersion": 1.1,
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        260,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalizar número do processo\nconst numero = $json.numeroProcesso.replace(/[^0-9]/g, '');\nlet fonte = ($json.fonte || 'auto').toLowerCase();\n\n// Validar formato CNJ (20 dígitos)\nif (numero.length !== 20) {\n    throw new Error(`Número de processo inválido. Esperado 20 dígitos, recebido ${numero.length}`);\n}\n\n// Formatar número CNJ\nconst numeroFormatado = numero.replace(\n    /(\\d{7})(\\d{2})(\\d{4})(\\d{1})(\\d{2})(\\d{4})/,\n    '$1-$2.$3.$4.$5.$6'\n);\n\n// Verificar cache\nconst staticData = $getWorkflowStaticData('global');\nconst cacheKey = `${numero}_${fonte}`;\nlet cachedData = null;\n\nif (staticData.cache && staticData.cache.processos && staticData.cache.processos[cacheKey]) {\n    const cached = staticData.cache.processos[cacheKey];\n    const cacheAge = Date.now() - cached.timestamp;\n    \n    // Cache válido por 1 hora\n    if (cacheAge < 3600000) {\n        console.log(`✅ Processo encontrado no cache (idade: ${Math.floor(cacheAge/60000)} min)`);\n        cachedData = {\n            ...cached.data,\n            fromCache: true\n        };\n    } else {\n        console.log('⏰ Cache expirado, consultando API');\n        delete staticData.cache.processos[cacheKey];\n    }\n} else {\n    console.log('🔍 Processo não encontrado no cache');\n}\n\nreturn {\n    numeroLimpo: numero,\n    numeroFormatado: numeroFormatado,\n    fonte: fonte,\n    cachedData: cachedData,\n    fromCache: !!cachedData\n};"
+      },
+      "id": "bc5f0a38-34f3-4ec5-b080-a188552a76bc",
+      "name": "Prepare & Check Cache",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        500,
+        100
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.fromCache }}",
+              "value2": "={{ true }}"
+            }
+          ]
+        }
+      },
+      "id": "08fe23ff-0124-494b-a4c4-5566c8cb2bf4",
+      "name": "From Cache?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        700,
+        100
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Retornar dados do cache\nconst prepareData = $node['Prepare & Check Cache'].json;\n\nif (!prepareData.cachedData) {\n    throw new Error('Dados do cache não encontrados');\n}\n\nconsole.log('📦 Retornando dados do cache');\n\n// Retornar os dados já processados do cache\nreturn prepareData.cachedData;"
+      },
+      "id": "78668b84-d0ef-4f37-ba12-d699d20ff445",
+      "name": "Return Cache Data",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1600,
+        -100
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT access_token, token_type, expires_at::text \nFROM pdpj_tokens \nWHERE token_key = 'pdpj_main_token' \nAND expires_at > $1\nLIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ Date.now() }}"
+        }
+      },
+      "id": "e2a1e1bb-21c2-40eb-b672-bc17136df642",
+      "name": "Get Valid Token",
+      "type": "n8n-nodes-base.postgres",
+      "position": [
+        900,
+        220
+      ],
+      "typeVersion": 2.6,
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "yaadLkWVMaWfr0vx",
+          "name": "Postgres account Railway"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "gBuv1OdwwrFlg23a",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "forceNewLogin": false
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "forceNewLogin",
+              "displayName": "forceNewLogin",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "9475fa2f-dcfd-42c8-bfd7-41e5db004672",
+      "name": "Request New Token",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "position": [
+        1300,
+        340
+      ],
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combinar dados do token com dados do processo\nconst prepareData = $node['Prepare & Check Cache'].json;\nlet tokenData;\n\n// Verificar de onde veio o token\nconst dbTokens = $node['Get Valid Token'].json;\nif (dbTokens && dbTokens.length > 0) {\n    // Token do banco de dados\n    tokenData = dbTokens[0];\n    console.log('✅ Usando token do banco de dados');\n} else {\n    // Token novo da autenticação\n    const authResult = $node['Request New Token'].json;\n    \n    // Verificar se tem o campo response\n    if (authResult.response && typeof authResult.response === 'string') {\n        const parsed = JSON.parse(authResult.response);\n        tokenData = {\n            access_token: parsed.access_token,\n            token_type: parsed.token_type || 'Bearer'\n        };\n    } else {\n        tokenData = {\n            access_token: authResult.access_token,\n            token_type: authResult.token_type || 'Bearer'\n        };\n    }\n    console.log('🔐 Usando token novo da autenticação');\n}\n\nif (!tokenData.access_token) {\n    throw new Error('Token não encontrado');\n}\n\nreturn {\n    ...prepareData,\n    token: tokenData.access_token,\n    tokenType: tokenData.token_type || 'Bearer',\n    hasToken: true\n};"
+      },
+      "id": "5ac95ffa-856d-4109-a04a-4b8994744606",
+      "name": "Merge Token Data",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1500,
+        220
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Decidir qual API usar baseado na fonte\nconst data = $input.first().json;\nconst fonte = data.fonte || 'auto';\n\nconsole.log(`🔀 Analisando roteamento para fonte: ${fonte}`);\n\n// Lógica de decisão\nlet usePDPJ = false;\nlet useApoia = false;\n\nswitch(fonte) {\n    case 'pdpj':\n        usePDPJ = true;\n        break;\n    case 'apoia':\n        useApoia = true;\n        break;\n    case 'auto':\n        // Por padrão, tenta PDPJ primeiro (mais estável)\n        usePDPJ = true;\n        // Apoia será usado como fallback se PDPJ falhar\n        break;\n    default:\n        usePDPJ = true;\n}\n\nreturn {\n    ...data,\n    usePDPJ,\n    useApoia,\n    routeDecision: fonte\n};"
+      },
+      "id": "e49bcbcd-9fd9-4bf3-985d-8a2b184903da",
+      "name": "Route Decision",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1700,
+        240
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.usePDPJ }}",
+              "value2": "={{ true }}"
+            }
+          ]
+        }
+      },
+      "id": "348a30ec-9e2c-440f-b2fe-7d9b38528845",
+      "name": "Use PDPJ?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        1900,
+        220
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "=https://portaldeservicos.pdpj.jus.br/api/v2/processos/{{ $json.numeroLimpo }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $json.tokenType }} {{ $json.token }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Forwarded-For",
+              "value": "177.67.81.10"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "cc9d0305-9e18-4601-b370-f1e9a28c3313",
+      "name": "PDPJ API v2",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        2100,
+        140
+      ],
+      "typeVersion": 4.2,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.statusCode || 200 }}",
+              "operation": "equal",
+              "value2": 200
+            }
+          ]
+        }
+      },
+      "id": "09cb2317-4012-49a3-964d-335f28c6cd21",
+      "name": "PDPJ Success?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        2300,
+        140
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.useApoia }}",
+              "value2": "={{ true }}"
+            }
+          ]
+        }
+      },
+      "id": "f0e2cac9-8d97-4d7e-821c-658002c7b6cd",
+      "name": "Use Apoia?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        1740,
+        440
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Verificar e obter sessão Apoia\nconst prepareData = $input.first().json;\nconst staticData = $getWorkflowStaticData('global');\n\n// Log de debug\nconsole.log('🔍 Verificando sessão Apoia...');\n\n// Verificar se temos sessão Apoia válida\nif (!staticData.apoiaSession || !staticData.apoiaSession.cookieString) {\n  console.log('❌ Sessão Apoia não encontrada');\n  \n  // Verificar se temos token PDPJ para fazer SSO\n  if (staticData.pdpj_auth && staticData.pdpj_auth.access_token) {\n    const tokenAge = Date.now() - (staticData.pdpj_auth.timestamp || 0);\n    const tokenExpired = tokenAge > (staticData.pdpj_auth.expires_in || 3600) * 1000;\n    \n    if (!tokenExpired) {\n      console.log('🔄 Token PDPJ válido, preparando para SSO...');\n      return {\n        ...prepareData,\n        needsApoiaLogin: true,\n        pdpjToken: staticData.pdpj_auth.access_token,\n        tokenType: staticData.pdpj_auth.token_type || 'Bearer'\n      };\n    } else {\n      throw new Error('Token PDPJ expirado. Execute login_pdpj primeiro.');\n    }\n  } else {\n    throw new Error('Nem token PDPJ nem sessão Apoia encontrados.');\n  }\n}\n\n// Verificar validade da sessão\nconst now = Date.now();\nconst sessionAge = now - (staticData.apoiaSession.timestamp || 0);\nconst maxAge = 23 * 60 * 60 * 1000; // 23 horas\n\nif (sessionAge > maxAge) {\n  console.log('❌ Sessão Apoia expirada');\n  return {\n    ...prepareData,\n    needsApoiaLogin: true,\n    pdpjToken: staticData.pdpj_auth?.access_token\n  };\n}\n\nconsole.log('✅ Sessão Apoia válida encontrada');\nconsole.log(`⏰ Idade da sessão: ${Math.floor(sessionAge / 60000)} minutos`);\nconsole.log(`⏰ Expira em: ${Math.floor((maxAge - sessionAge) / 60000)} minutos`);\n\nreturn {\n  ...prepareData,\n  cookieString: staticData.apoiaSession.cookieString,\n  hasValidSession: true,\n  needsApoiaLogin: false\n};"
+      },
+      "id": "160775ad-fbef-4a51-8f65-67b47fa6c9ca",
+      "name": "Get Apoia Session",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        2020,
+        400
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.needsApoiaLogin }}",
+              "value2": "={{ true }}"
+            }
+          ]
+        }
+      },
+      "id": "15e293fb-12e6-431f-bdb6-7023d19901e1",
+      "name": "Needs Apoia Login?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        2520,
+        320
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "GxZAjjfpsqit1RXM",
+          "mode": "list",
+          "cachedResultName": "SUB-WORKFLOW - Login Apoia SSO"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "forceNewLogin": false,
+            "pdpjToken": "={{ $json.pdpjToken }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "pdpjToken",
+              "displayName": "pdpjToken",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "forceNewLogin",
+              "displayName": "forceNewLogin",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "d2bba517-064a-4e4f-a26b-cf8f86d6bf40",
+      "name": "Execute Apoia Login",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "position": [
+        2720,
+        420
+      ],
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "url": "=https://apoia.pdpj.jus.br/api/v1/process/{{ $json.numeroLimpo }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "cookie",
+              "value": "={{ $json.cookieString }}"
+            },
+            {
+              "name": "accept",
+              "value": "*/*"
+            },
+            {
+              "name": "accept-language",
+              "value": "pt,en-US;q=0.9,en;q=0.8,pt-BR;q=0.7"
+            },
+            {
+              "name": "priority",
+              "value": "u=1, i"
+            },
+            {
+              "name": "referer",
+              "value": "https://apoia.pdpj.jus.br/community"
+            },
+            {
+              "name": "sec-ch-ua",
+              "value": "\"Chromium\";v=\"125\", \"Not.A/Brand\";v=\"24\""
+            },
+            {
+              "name": "sec-ch-ua-mobile",
+              "value": "?0"
+            },
+            {
+              "name": "sec-ch-ua-platform",
+              "value": "\"Windows\""
+            },
+            {
+              "name": "sec-fetch-dest",
+              "value": "empty"
+            },
+            {
+              "name": "sec-fetch-mode",
+              "value": "cors"
+            },
+            {
+              "name": "sec-fetch-site",
+              "value": "same-origin"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "84337433-0d82-40dc-b085-d27aacb3cef6",
+      "name": "ApoIA API",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        2920,
+        320
+      ],
+      "typeVersion": 4.2,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "pdpj-source",
+              "name": "_source",
+              "value": "PDPJ",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "8f6730f7-6722-40ab-8711-a7c68c61c9a6",
+      "name": "Add Source PDPJ",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        2500,
+        140
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "apoia-source",
+              "name": "_source",
+              "value": "ApoIA",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "1d8ca1f2-c6e0-4654-8285-8a0139a83d96",
+      "name": "Add Source Apoia",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        3120,
+        320
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "jsCode": "// Tentar Apoia como fallback se fonte é auto\nconst data = $node['Route Decision'].json;\nconst pdpjError = $input.first().json;\n\nif (data.fonte === 'auto') {\n  console.log('🔄 PDPJ falhou, tentando Apoia como fallback');\n  return {\n    ...data,\n    useApoia: true,\n    fallbackAttempt: true\n  };\n} else {\n  // Se não é auto e PDPJ falhou, enviar erro detalhado\n  console.log('❌ Falha na consulta PDPJ:', pdpjError);\n  \n  return {\n    success: false,\n    error: true,\n    message: pdpjError.message || 'Erro ao consultar PDPJ',\n    processo: null,\n    fonte: 'PDPJ',\n    details: pdpjError\n  };\n}"
+      },
+      "id": "e6d9cff9-d9c2-430d-8a8f-d8803cfeaa51",
+      "name": "Try Apoia Fallback",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        2500,
+        -40
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Processar e padronizar resposta COMPLETO com análise avançada\nconst input = $input.first().json;\nconst prepareData = $node['Prepare & Check Cache'].json;\n\n// Se já veio do cache, apenas retornar\nif (input.fromCache) {\n    console.log('✅ Retornando dados do cache');\n    return input;\n}\n\n// Determinar fonte dos dados\nlet fonte = 'PDPJ';\nif (input._source) {\n    fonte = input._source;\n} else if (input.arrayDeDadosDoProcesso) {\n    fonte = 'ApoIA';\n}\n\nconsole.log(`📊 Processando dados da fonte: ${fonte}`);\n\nlet processo = {};\n\n// PROCESSAR DADOS PDPJ - VERSÃO COMPLETA\nif (fonte === 'PDPJ' || input.tribunal) {\n    \n    // 1. PROCESSAR INFORMAÇÕES DE TODAS AS INSTÂNCIAS\n    const instancias = {\n        primeiroGrau: null,\n        segundoGrau: null,\n        tribunalSuperior: null\n    };\n    \n    // Verificar se há dados de múltiplas instâncias\n    if (input.instancia) {\n        instancias.primeiroGrau = {\n            orgao: input.orgaoJulgador?.[0]?.nome || 'Não informado',\n            distribuicao: input.distribuicao?.[0]?.dataHora || null,\n            situacao: input.situacao || 'Em andamento'\n        };\n    }\n    \n    // 2. PROCESSAR MOVIMENTAÇÕES E IDENTIFICAR FASE\n    let movimentacoesProcessadas = [];\n    let faseProcessual = 'Distribuído';\n    let temSentenca = false;\n    let temAcordao = false;\n    let temRecurso = false;\n    let temTransito = false;\n    \n    if (input.movimentos && Array.isArray(input.movimentos)) {\n        movimentacoesProcessadas = input.movimentos.map(mov => {\n            const descricao = mov.descricao || '';\n            const descricaoLower = descricao.toLowerCase();\n            \n            // Identificar marcos processuais\n            if (descricaoLower.includes('sentença')) temSentenca = true;\n            if (descricaoLower.includes('acórdão')) temAcordao = true;\n            if (descricaoLower.includes('recurso') || descricaoLower.includes('apelação')) temRecurso = true;\n            if (descricaoLower.includes('trânsito em julgado')) temTransito = true;\n            \n            return {\n                data: mov.dataHora,\n                descricao: descricao,\n                complemento: mov.complemento || ''\n            };\n        });\n        \n        // Determinar fase processual\n        if (temTransito) {\n            faseProcessual = 'Transitado em julgado';\n        } else if (temAcordao) {\n            faseProcessual = '2º Grau - Julgado';\n            instancias.segundoGrau = { status: 'Julgado' };\n        } else if (temRecurso) {\n            faseProcessual = 'Em grau recursal';\n            instancias.segundoGrau = { status: 'Em andamento' };\n        } else if (temSentenca) {\n            faseProcessual = '1º Grau - Sentenciado';\n        } else if (movimentacoesProcessadas.some(m => m.descricao.toLowerCase().includes('audiência'))) {\n            faseProcessual = 'Instrução processual';\n        } else if (movimentacoesProcessadas.some(m => m.descricao.toLowerCase().includes('contestação'))) {\n            faseProcessual = 'Fase postulatória';\n        }\n    }\n    \n    // 3. PROCESSAR PARTES COM ANÁLISE\n    let partesProcessadas = {\n        poloAtivo: [],\n        poloPassivo: [],\n        outros: []\n    };\n    \n    if (input.partes && Array.isArray(input.partes)) {\n        input.partes.forEach(parte => {\n            const parteFormatada = {\n                nome: parte.nome || 'Nome não informado',\n                documento: parte.documentosPrincipais?.[0]?.numero || 'Não informado',\n                tipoDocumento: parte.documentosPrincipais?.[0]?.tipo || 'Não informado',\n                sigilosa: parte.sigilosa || false,\n                advogados: []\n            };\n            \n            // Adicionar advogados\n            if (parte.representantes && Array.isArray(parte.representantes)) {\n                parte.representantes.forEach(rep => {\n                    if (rep.tipoRepresentacao === 'ADVOGADO') {\n                        parteFormatada.advogados.push({\n                            nome: rep.nome,\n                            documento: rep.cadastroReceitaFederal?.[0]?.numero || 'N/I'\n                        });\n                    }\n                });\n            }\n            \n            if (parte.polo === 'ATIVO') {\n                partesProcessadas.poloAtivo.push(parteFormatada);\n            } else if (parte.polo === 'PASSIVO') {\n                partesProcessadas.poloPassivo.push(parteFormatada);\n            } else {\n                partesProcessadas.outros.push(parteFormatada);\n            }\n        });\n    }\n    \n    // 4. IDENTIFICAR DOCUMENTOS IMPORTANTES\n    let documentosRelevantes = {\n        inicial: null,\n        contestacao: null,\n        sentenca: null,\n        acordao: null,\n        recurso: null\n    };\n    \n    if (input.documentos && Array.isArray(input.documentos)) {\n        input.documentos.forEach(doc => {\n            const nomeDoc = doc.nome.toLowerCase();\n            \n            if (nomeDoc.includes('inicial') || nomeDoc.includes('petição inicial')) {\n                documentosRelevantes.inicial = doc;\n            } else if (nomeDoc.includes('contestação') || nomeDoc.includes('defesa')) {\n                documentosRelevantes.contestacao = doc;\n            } else if (nomeDoc.includes('sentença')) {\n                documentosRelevantes.sentenca = doc;\n            } else if (nomeDoc.includes('acórdão') || nomeDoc.includes('acordao')) {\n                documentosRelevantes.acordao = doc;\n            } else if (nomeDoc.includes('recurso') || nomeDoc.includes('apelação')) {\n                documentosRelevantes.recurso = doc;\n            }\n        });\n    }\n    \n    // 5. PROCESSAR ASSUNTOS E CLASSES\n    let assuntoProcessado = 'Não informado';\n    let hierarquiaAssunto = '';\n    if (input.assunto && Array.isArray(input.assunto) && input.assunto.length > 0) {\n        assuntoProcessado = input.assunto[0].descricao || 'Não informado';\n        hierarquiaAssunto = input.assunto[0].hierarquia || '';\n    }\n    \n    let classeProcessada = 'Não informada';\n    if (input.classe && Array.isArray(input.classe) && input.classe.length > 0) {\n        classeProcessada = input.classe[0].descricao || 'Não informada';\n    }\n    \n    // 6. MONTAR OBJETO PROCESSO COMPLETO\n    processo = {\n        // Identificação\n        numeroProcesso: input.numeroProcesso || prepareData.numeroFormatado,\n        numeroFormatado: prepareData.numeroFormatado,\n        numeroUnificado: input.numeroProcesso || prepareData.numeroFormatado,\n        \n        // Dados básicos\n        classe: classeProcessada,\n        assunto: assuntoProcessado,\n        hierarquiaAssunto: hierarquiaAssunto,\n        \n        // Valores\n        valorCausa: input.valorAcao || input.valorCausa || 0,\n        valorCausaFormatado: new Intl.NumberFormat('pt-BR', {\n            style: 'currency',\n            currency: 'BRL'\n        }).format(input.valorAcao || input.valorCausa || 0),\n        \n        // Status e Fase\n        situacao: input.situacao || 'Em andamento',\n        faseProcessual: faseProcessual,\n        segredoJustica: input.nivelSigilo > 0,\n        justicaGratuita: input.justicaGratuita || false,\n        \n        // Localização e Instâncias\n        tribunal: input.tribunal?.nome || `${input.tribunal?.sigla || 'N/I'} - Tribunal de Justiça`,\n        siglaTribunal: input.tribunal?.sigla || 'N/I',\n        instancias: instancias,\n        \n        // Datas importantes\n        dataDistribuicao: input.distribuicao?.[0]?.dataHora || null,\n        dataUltimaMovimentacao: movimentacoesProcessadas[0]?.data || null,\n        \n        // Partes\n        partes: partesProcessadas,\n        \n        // Movimentações\n        movimentacoes: movimentacoesProcessadas,\n        totalMovimentacoes: movimentacoesProcessadas.length,\n        ultimasMovimentacoes: movimentacoesProcessadas.slice(0, 5),\n        \n        // Documentos\n        documentos: input.documentos || [],\n        documentosRelevantes: documentosRelevantes,\n        quantidadeDocumentos: input.documentos ? input.documentos.length : 0,\n        \n        // Análise processual\n        marcosProcessuais: {\n            temSentenca: temSentenca,\n            temAcordao: temAcordao,\n            temRecurso: temRecurso,\n            temTransito: temTransito\n        },\n        \n        // Metadados\n        fonte: 'PDPJ',\n        dataConsulta: new Date().toISOString()\n    };\n    \n    // 7. GERAR RESUMO AUTOMÁTICO\n    processo.resumoProcessual = `Processo de ${processo.classe} sobre ${processo.assunto}, ` +\n        `distribuído em ${processo.dataDistribuicao ? new Date(processo.dataDistribuicao).toLocaleDateString('pt-BR') : 'data não informada'}. ` +\n        `Valor da causa: ${processo.valorCausaFormatado}. ` +\n        `Fase atual: ${processo.faseProcessual}. `;\n    \n    if (processo.marcosProcessuais.temSentenca) {\n        processo.resumoProcessual += 'Já possui sentença de 1º grau. ';\n    }\n    if (processo.marcosProcessuais.temAcordao) {\n        processo.resumoProcessual += 'Já possui acórdão de 2º grau. ';\n    }\n    if (processo.marcosProcessuais.temTransito) {\n        processo.resumoProcessual += 'Processo transitado em julgado. ';\n    }\n}\n\n// 8. ANÁLISE ESPECÍFICA MIDEA CARRIER\nconst textoCompleto = JSON.stringify(input).toLowerCase();\nprocesso.envolveMideaCarrier = \n    textoCompleto.includes('midea') || \n    textoCompleto.includes('carrier') ||\n    textoCompleto.includes('springer') ||\n    textoCompleto.includes('climazon');\n\nif (processo.envolveMideaCarrier) {\n    // Identificar produtos\n    const produtos = [\n        { nome: 'ar condicionado', keywords: ['ar condicionado', 'split', 'climatizador', 'inverter', 'condicionador'] },\n        { nome: 'refrigerador', keywords: ['refrigerador', 'geladeira', 'frost free'] },\n        { nome: 'lava e seca', keywords: ['lava e seca', 'lavadora', 'secadora'] },\n        { nome: 'micro-ondas', keywords: ['microondas', 'micro-ondas', 'micro ondas'] }\n    ];\n    \n    processo.produtosIdentificados = produtos\n        .filter(p => p.keywords.some(kw => textoCompleto.includes(kw)))\n        .map(p => p.nome);\n    \n    // Análise de riscos baseada em movimentações e assunto\n    const movimentacoesTexto = processo.movimentacoes.map(m => m.descricao).join(' ').toLowerCase();\n    \n    processo.analiseRiscos = {\n        defeito: textoCompleto.includes('defeito') || textoCompleto.includes('vício'),\n        garantia: textoCompleto.includes('garantia'),\n        assistenciaTecnica: textoCompleto.includes('assistência técnica'),\n        danoMoral: textoCompleto.includes('dano moral') || hierarquiaAssunto.includes('Dano Moral'),\n        recall: textoCompleto.includes('recall'),\n        temAcordo: movimentacoesTexto.includes('acordo') || movimentacoesTexto.includes('transação'),\n        temPericia: movimentacoesTexto.includes('perícia') || movimentacoesTexto.includes('perito'),\n        temLiminar: movimentacoesTexto.includes('liminar') || movimentacoesTexto.includes('tutela')\n    };\n    \n    // Adicionar análise ao resumo\n    if (processo.produtosIdentificados.length > 0) {\n        processo.resumoProcessual += `Envolve ${processo.produtosIdentificados.join(', ')} da Midea/Carrier. `;\n    }\n    if (processo.analiseRiscos.danoMoral) {\n        processo.resumoProcessual += 'Inclui pedido de danos morais. ';\n    }\n}\n\n// 9. GERAR URL PARA VISUALIZAÇÃO\nprocesso.urlProcesso = `https://portaldeservicos.pdpj.jus.br/consulta/${prepareData.numeroLimpo}`;\n\n// 10. SALVAR NO CACHE\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.cache) staticData.cache = {};\nif (!staticData.cache.processos) staticData.cache.processos = {};\n\nconst cacheKey = `${prepareData.numeroLimpo}_${prepareData.fonte}`;\nstaticData.cache.processos[cacheKey] = {\n    data: processo,\n    timestamp: Date.now()\n};\n\nconsole.log(`💾 Processo salvo no cache: ${cacheKey}`);\n\n// 11. RETORNAR RESPOSTA COMPLETA\nreturn {\n    success: true,\n    processo: processo,\n    analiseCompleta: true,\n    instrucaoParaIA: `ANÁLISE COMPLETA DO PROCESSO ${processo.numeroFormatado}:\\n\\n` +\n                     `RESUMO: ${processo.resumoProcessual}\\n\\n` +\n                     `PARTES:\\n` +\n                     `- Autor(es): ${processo.partes.poloAtivo.map(p => `${p.nome} (${p.tipoDocumento}: ${p.documento})`).join(', ')}\\n` +\n                     `- Réu(s): ${processo.partes.poloPassivo.map(p => `${p.nome} (${p.tipoDocumento}: ${p.documento})`).join(', ')}\\n\\n` +\n                     `ÚLTIMAS MOVIMENTAÇÕES:\\n` +\n                     processo.ultimasMovimentacoes.map(m => `- ${new Date(m.data).toLocaleDateString('pt-BR')} - ${m.descricao}`).join('\\n') + '\\n\\n' +\n                     `DOCUMENTOS RELEVANTES:\\n` +\n                     `- Inicial: ${processo.documentosRelevantes.inicial ? 'Sim' : 'Não identificada'}\\n` +\n                     `- Sentença: ${processo.documentosRelevantes.sentenca ? 'Sim' : 'Não identificada'}\\n` +\n                     `- Acórdão: ${processo.documentosRelevantes.acordao ? 'Sim' : 'Não identificada'}\\n\\n` +\n                     `${processo.envolveMideaCarrier ? '⚠️ PROCESSO ENVOLVE MIDEA/CARRIER - ATENÇÃO ESPECIAL NECESSÁRIA' : ''}`\n};"
+      },
+      "id": "ed195de5-8934-437a-9d36-d4bc1518e767",
+      "name": "Process & Cache Data",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        3480,
+        220
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b32be366-a208-494b-be9e-d098d5cd2e75",
+              "leftValue": "={{ $json.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1040,
+        280
+      ],
+      "id": "363e66b2-9e6b-4b35-b836-de6e9a68af32",
+      "name": "Has Valid Token?1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e6f38278-0ed2-4f99-9cd3-d55bc59fd667",
+              "leftValue": "={{ $json.fromCache }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        640,
+        440
+      ],
+      "id": "76e3dd2c-241a-4b90-b67f-c6063e0daaae",
+      "name": "From Cache?1",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Executar login Apoia se necessário\nconst data = $input.first().json;\n\nif (data.needsApoiaLogin) {\n  console.log('🔄 Executando login Apoia automaticamente...');\n  \n  // Dados para executar o sub-workflow\n  return {\n    needsApoiaLogin: true,\n    pdpjToken: data.pdpjToken || $getWorkflowStaticData('global').pdpj_auth?.access_token,\n    continueWith: data\n  };\n}\n\n// Se não precisa login, passar adiante\nreturn data;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2260,
+        380
+      ],
+      "id": "521bc326-f2df-46c8-a66a-9918e1b5bae1",
+      "name": "Handle Apoia Error"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Prepare & Check Cache",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare & Check Cache": {
+      "main": [
+        [
+          {
+            "node": "From Cache?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "From Cache?": {
+      "main": [
+        [
+          {
+            "node": "Return Cache Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Valid Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return Cache Data": {
+      "main": [
+        [
+          {
+            "node": "Process & Cache Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Valid Token": {
+      "main": [
+        [
+          {
+            "node": "Has Valid Token?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request New Token": {
+      "main": [
+        [
+          {
+            "node": "Merge Token Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Token Data": {
+      "main": [
+        [
+          {
+            "node": "Route Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Decision": {
+      "main": [
+        [
+          {
+            "node": "Use PDPJ?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Use Apoia?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use PDPJ?": {
+      "main": [
+        [
+          {
+            "node": "PDPJ API v2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Process & Cache Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PDPJ API v2": {
+      "main": [
+        [
+          {
+            "node": "PDPJ Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PDPJ Success?": {
+      "main": [
+        [
+          {
+            "node": "Add Source PDPJ",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Try Apoia Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Source PDPJ": {
+      "main": [
+        [
+          {
+            "node": "Process & Cache Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Try Apoia Fallback": {
+      "main": [
+        [
+          {
+            "node": "Use Apoia?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use Apoia?": {
+      "main": [
+        [
+          {
+            "node": "Get Apoia Session",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Process & Cache Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Apoia Session": {
+      "main": [
+        [
+          {
+            "node": "Handle Apoia Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Apoia Login?": {
+      "main": [
+        [
+          {
+            "node": "ApoIA API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute Apoia Login",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Apoia Login": {
+      "main": [
+        [
+          {
+            "node": "Get Apoia Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ApoIA API": {
+      "main": [
+        [
+          {
+            "node": "Add Source Apoia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Source Apoia": {
+      "main": [
+        [
+          {
+            "node": "Process & Cache Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Valid Token?1": {
+      "main": [
+        [
+          {
+            "node": "Merge Token Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Request New Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Apoia Error": {
+      "main": [
+        [
+          {
+            "node": "Needs Apoia Login?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process & Cache Data": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "edd77a14-4ee2-4696-99ad-10eb17f6a58f",
+  "meta": {
+    "instanceId": "9601c2da077393e3c7d395982728b7744de7ac7dd087f4789f3781b83e316e6e"
+  },
+  "id": "bE1PwRk5KHdLVHjc",
+  "tags": []
+}

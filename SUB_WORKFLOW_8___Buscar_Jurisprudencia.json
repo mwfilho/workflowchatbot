@@ -1,0 +1,221 @@
+{
+  "name": "SUB-WORKFLOW 8 - Buscar Jurisprudencia",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "termos"
+            },
+            {
+              "name": "numeroProcesso"
+            },
+            {
+              "name": "tribunal"
+            },
+            {
+              "name": "periodo"
+            }
+          ]
+        }
+      },
+      "id": "bc9097e0-88f1-444d-a7a2-382d9210f5d7",
+      "name": "Input Jurisprudência",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1.1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Preparar busca de jurisprudência\nconst termos = $json.termos;\nconst numeroProcesso = $json.numeroProcesso || '';\nconst tribunal = $json.tribunal || '';\nconst periodo = $json.periodo || '2anos';\n\nif (!termos || termos.trim() === '') {\n    throw new Error('Termos de busca não fornecidos');\n}\n\n// Enriquecer termos com contexto Midea se houver processo\nlet termosEnriquecidos = termos;\nlet contextoProcesso = null;\n\nif (numeroProcesso) {\n    // Buscar dados do processo para contexto\n    const staticData = $getWorkflowStaticData('global');\n    const cache = staticData.cache?.processos || {};\n    const numeroLimpo = numeroProcesso.replace(/[^0-9]/g, '');\n    const cached = cache[`${numeroLimpo}_auto`];\n    \n    if (cached && cached.data) {\n        contextoProcesso = cached.data;\n        \n        // Adicionar termos relevantes do processo\n        if (contextoProcesso.produtosIdentificados?.length > 0) {\n            termosEnriquecidos += ` ${contextoProcesso.produtosIdentificados.join(' ')}`;\n        }\n        \n        if (contextoProcesso.assunto) {\n            termosEnriquecidos += ` ${contextoProcesso.assunto}`;\n        }\n    }\n}\n\n// Adicionar termos específicos para Midea Carrier\nconst termosMidea = [\n    'midea', 'carrier', 'ar condicionado', 'climatização',\n    'vício do produto', 'defeito de fabricação', 'CDC',\n    'responsabilidade solidária', 'garantia'\n];\n\n// Verificar se algum termo Midea está presente\nconst incluiTermosMidea = termosMidea.some(termo => \n    termos.toLowerCase().includes(termo)\n);\n\nif (!incluiTermosMidea) {\n    termosEnriquecidos += ' defeito produto consumidor';\n}\n\n// Calcular período de busca\nconst hoje = new Date();\nlet dataInicio = new Date();\n\nswitch (periodo) {\n    case '1ano':\n        dataInicio.setFullYear(hoje.getFullYear() - 1);\n        break;\n    case '2anos':\n        dataInicio.setFullYear(hoje.getFullYear() - 2);\n        break;\n    case '5anos':\n        dataInicio.setFullYear(hoje.getFullYear() - 5);\n        break;\n    default:\n        dataInicio = null; // Todos os períodos\n}\n\n// Buscar token\nconst auth = staticData.pdpj_auth;\n\nif (!auth || !auth.access_token) {\n    throw new Error('Token não encontrado. Execute autenticação primeiro.');\n}\n\nconsole.log(`⚖️ Buscando jurisprudência: \"${termosEnriquecidos}\"`);\n\nreturn {\n    termos: termos,\n    termosEnriquecidos: termosEnriquecidos,\n    numeroProcesso: numeroProcesso,\n    contextoProcesso: contextoProcesso,\n    tribunal: tribunal,\n    periodo: periodo,\n    dataInicio: dataInicio ? dataInicio.toISOString().split('T')[0] : null,\n    dataFim: hoje.toISOString().split('T')[0],\n    token: auth.access_token,\n    tokenType: auth.token_type\n};"
+      },
+      "id": "862e91fa-af6f-4d46-a539-1bb89ffd3a9d",
+      "name": "Prepare Jurisprudência Search",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        200,
+        0
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apoia.pdpj.jus.br/v1/jurisprudencia/buscar",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $json.tokenType }} {{ $json.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "termos",
+              "value": "={{ $json.termosEnriquecidos }}"
+            },
+            {
+              "name": "tribunal",
+              "value": "={{ $json.tribunal }}"
+            },
+            {
+              "name": "dataInicio",
+              "value": "={{ $json.dataInicio }}"
+            },
+            {
+              "name": "dataFim",
+              "value": "={{ $json.dataFim }}"
+            },
+            {
+              "name": "limite",
+              "value": "30"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 45000
+        }
+      },
+      "id": "264be0d7-a339-45e0-bf3f-b109a186b7e2",
+      "name": "Search ApoIA Jurisprudência",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        400,
+        0
+      ],
+      "typeVersion": 4.2,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://www.jusbrasil.com.br/api/v1/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $node['Prepare Jurisprudência Search'].json.termos }}"
+            },
+            {
+              "name": "type",
+              "value": "jurisprudencia"
+            },
+            {
+              "name": "limit",
+              "value": "20"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "df02f8d2-435f-4c04-a8db-b412720fc230",
+      "name": "Search JusBrasil",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        600,
+        0
+      ],
+      "typeVersion": 4.2,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Processar e consolidar resultados de jurisprudência\nconst apoiaResults = $node['Search ApoIA Jurisprudência']?.json || {};\nconst jusbrasil = $node['Search JusBrasil']?.json || {};\nconst searchParams = $node['Prepare Jurisprudência Search'].json;\n\n// Consolidar jurisprudências de ambas as fontes\nlet jurisprudencias = [];\n\n// Processar resultados do ApoIA\nif (apoiaResults.jurisprudencias || apoiaResults.resultados) {\n    const apoiaJuris = apoiaResults.jurisprudencias || apoiaResults.resultados || [];\n    apoiaJuris.forEach(juris => {\n        jurisprudencias.push({\n            fonte: 'ApoIA',\n            id: juris.id || generateId(),\n            tribunal: juris.tribunal || 'Não informado',\n            numeroAcordao: juris.numeroAcordao || juris.numero,\n            relator: juris.relator || 'Não informado',\n            dataJulgamento: juris.dataJulgamento || juris.data,\n            ementa: juris.ementa || juris.resumo || '',\n            decisao: juris.decisao || juris.resultado || '',\n            votacao: juris.votacao || 'Não informada',\n            relevancia: calcularRelevancia(juris, searchParams),\n            favoravel: analisarFavorabilidade(juris),\n            link: juris.link || juris.url || null\n        });\n    });\n}\n\n// Processar resultados do JusBrasil\nif (jusbrasil.results || jusbrasil.items) {\n    const jbResults = jusbrasil.results || jusbrasil.items || [];\n    jbResults.forEach(item => {\n        if (item.type === 'jurisprudencia' || item.categoria === 'jurisprudencia') {\n            jurisprudencias.push({\n                fonte: 'JusBrasil',\n                id: item.id || generateId(),\n                tribunal: extrairTribunal(item.title || item.titulo),\n                numeroAcordao: extrairNumero(item.title || item.titulo),\n                relator: item.relator || 'Não informado',\n                dataJulgamento: item.date || item.dataPublicacao,\n                ementa: item.snippet || item.resumo || '',\n                decisao: item.content || '',\n                votacao: 'Não informada',\n                relevancia: calcularRelevancia(item, searchParams),\n                favoravel: analisarFavorabilidade(item),\n                link: item.url || item.link || null\n            });\n        }\n    });\n}\n\n// Ordenar por relevância e data\njurisprudencias.sort((a, b) => {\n    if (a.relevancia !== b.relevancia) {\n        return b.relevancia - a.relevancia;\n    }\n    return new Date(b.dataJulgamento) - new Date(a.dataJulgamento);\n});\n\n// Limitar a 30 resultados mais relevantes\njurisprudencias = jurisprudencias.slice(0, 30);\n\n// Análise agregada\nconst analise = {\n    totalEncontrado: jurisprudencias.length,\n    porFonte: {\n        apoia: jurisprudencias.filter(j => j.fonte === 'ApoIA').length,\n        jusbrasil: jurisprudencias.filter(j => j.fonte === 'JusBrasil').length\n    },\n    porTribunal: {},\n    favorabilidade: {\n        favoravel: jurisprudencias.filter(j => j.favoravel === 'favorável').length,\n        desfavoravel: jurisprudencias.filter(j => j.favoravel === 'desfavorável').length,\n        neutro: jurisprudencias.filter(j => j.favoravel === 'neutro').length\n    },\n    temasPrincipais: extrairTemas(jurisprudencias)\n};\n\n// Contar por tribunal\njurisprudencias.forEach(juris => {\n    const tribunal = juris.tribunal || 'Não informado';\n    if (!analise.porTribunal[tribunal]) {\n        analise.porTribunal[tribunal] = 0;\n    }\n    analise.porTribunal[tribunal]++;\n});\n\n// Destacar precedentes importantes para Midea\nconst precedentesImportantes = jurisprudencias.filter(juris => {\n    const texto = (juris.ementa + juris.decisao).toLowerCase();\n    return texto.includes('midea') || \n           texto.includes('carrier') ||\n           texto.includes('ar condicionado') ||\n           texto.includes('defeito de fabricação') ||\n           texto.includes('vício do produto');\n});\n\n// Funções auxiliares\nfunction generateId() {\n    return `juris_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;\n}\n\nfunction calcularRelevancia(item, params) {\n    let score = 0;\n    const texto = JSON.stringify(item).toLowerCase();\n    const termos = params.termos.toLowerCase().split(' ');\n    \n    // Pontuação por presença de termos\n    termos.forEach(termo => {\n        if (texto.includes(termo)) score += 5;\n    });\n    \n    // Bonus por menção a Midea/Carrier\n    if (texto.includes('midea') || texto.includes('carrier')) score += 20;\n    \n    // Bonus por tribunal superior\n    if (texto.includes('stj') || texto.includes('superior tribunal')) score += 15;\n    if (texto.includes('stf') || texto.includes('supremo')) score += 10;\n    \n    // Bonus por data recente\n    const dataJulg = new Date(item.dataJulgamento || item.data || 0);\n    const diasAtras = (Date.now() - dataJulg) / (1000 * 60 * 60 * 24);\n    if (diasAtras < 365) score += 10;\n    else if (diasAtras < 730) score += 5;\n    \n    return score;\n}\n\nfunction analisarFavorabilidade(item) {\n    const texto = JSON.stringify(item).toLowerCase();\n    \n    // Termos favoráveis ao réu\n    const termosFavoraveis = [\n        'improcedente', 'negou provimento', 'mantida sentença', \n        'ausência de prova', 'não comprovado', 'culpa exclusiva',\n        'mau uso', 'não configurado'\n    ];\n    \n    // Termos desfavoráveis ao réu\n    const termosDesfavoraveis = [\n        'procedente', 'deu provimento', 'condenação mantida',\n        'defeito comprovado', 'responsabilidade objetiva', \n        'dano moral configurado', 'vício do produto'\n    ];\n    \n    const countFavoravel = termosFavoraveis.filter(t => texto.includes(t)).length;\n    const countDesfavoravel = termosDesfavoraveis.filter(t => texto.includes(t)).length;\n    \n    if (countFavoravel > countDesfavoravel) return 'favorável';\n    if (countDesfavoravel > countFavoravel) return 'desfavorável';\n    return 'neutro';\n}\n\nfunction extrairTribunal(titulo) {\n    const tribunais = ['STF', 'STJ', 'TST', 'TJ', 'TRF', 'TRT'];\n    for (const trib of tribunais) {\n        if (titulo.includes(trib)) {\n            const match = titulo.match(new RegExp(`${trib}[A-Z-]*`));\n            if (match) return match[0];\n        }\n    }\n    return 'Tribunal não identificado';\n}\n\nfunction extrairNumero(titulo) {\n    const match = titulo.match(/\\d{4,}/);\n    return match ? match[0] : 'Número não identificado';\n}\n\nfunction extrairTemas(jurisprudencias) {\n    const temas = {};\n    const palavrasChave = [\n        'defeito de fabricação', 'vício do produto', 'garantia',\n        'responsabilidade objetiva', 'dano moral', 'CDC',\n        'inversão ônus prova', 'assistência técnica'\n    ];\n    \n    jurisprudencias.forEach(juris => {\n        const texto = (juris.ementa + juris.decisao).toLowerCase();\n        palavrasChave.forEach(palavra => {\n            if (texto.includes(palavra)) {\n                temas[palavra] = (temas[palavra] || 0) + 1;\n            }\n        });\n    });\n    \n    return Object.entries(temas)\n        .sort((a, b) => b[1] - a[1])\n        .slice(0, 5)\n        .map(([tema, count]) => ({ tema, count }));\n}\n\nreturn {\n    sucesso: true,\n    termosBusca: searchParams.termos,\n    numeroProcessoReferencia: searchParams.numeroProcesso,\n    periodo: searchParams.periodo,\n    tribunal: searchParams.tribunal || 'Todos',\n    totalEncontrado: jurisprudencias.length,\n    jurisprudencias: jurisprudencias,\n    precedentesImportantes: precedentesImportantes,\n    analise: analise,\n    mensagem: `Encontradas ${jurisprudencias.length} jurisprudências relevantes${precedentesImportantes.length > 0 ? ` (${precedentesImportantes.length} mencionam Midea/produtos similares)` : ''}`\n};"
+      },
+      "id": "38578c1e-4416-471e-8897-32b44e5ee297",
+      "name": "Process Jurisprudência",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        800,
+        0
+      ],
+      "typeVersion": 2
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Input Jurisprudência": {
+      "main": [
+        [
+          {
+            "node": "Prepare Jurisprudência Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Jurisprudência Search": {
+      "main": [
+        [
+          {
+            "node": "Search ApoIA Jurisprudência",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search ApoIA Jurisprudência": {
+      "main": [
+        [
+          {
+            "node": "Search JusBrasil",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search JusBrasil": {
+      "main": [
+        [
+          {
+            "node": "Process Jurisprudência",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "0dad7f1e-dae8-4cfd-8d23-0fb7fde43108",
+  "meta": {
+    "instanceId": "9601c2da077393e3c7d395982728b7744de7ac7dd087f4789f3781b83e316e6e"
+  },
+  "id": "uRYiUWqCUOjQm1c0",
+  "tags": []
+}

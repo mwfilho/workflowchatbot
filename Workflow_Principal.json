@@ -1,0 +1,974 @@
+{
+  "name": "Workflow Principal",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "initialMessages": "=👋 Bem-vindo ao Assistente Jurídico PDPJ da Midea Carrier!\\n\\nSou especializado em consultas processuais e posso ajudar você com:\\n\\n📋 **Consulta de Processos** - Individual ou em lote\\n📄 **Documentos** - Listagem e download de peças processuais\\n📊 **Relatórios** - Análise completa com resumo executivo\\n⚖️ **Jurisprudência** - Busca de casos similares\\n🔍 **Pesquisa** - Localizar processos por partes ou assuntos\\n\\n💡 **Dica**: Digite o número do processo no formato CNJ (ex: 5006229-10.2025.8.08.0035) ou peça ajuda com qualquer funcionalidade.\\n\\nComo posso ajudar você hoje?",
+        "options": {
+          "inputPlaceholder": "=Digite o número do processo ou sua pergunta...",
+          "subtitle": "Consulta e análise de processos judiciais",
+          "title": "Assistente Jurídico PDPJ - Midea Carrier"
+        }
+      },
+      "id": "b30fbc74-105a-41c2-8e10-a7c4cc6b5b77",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "position": [
+        -520,
+        40
+      ],
+      "typeVersion": 1.1,
+      "webhookId": "7f731f36-d66f-4a9e-96de-e826390b2e3e"
+    },
+    {
+      "parameters": {
+        "content": "## Configuração Global do Workflow\n\n### 1. Credenciais Necessárias:\n- **OpenAI API**: Para o modelo de linguagem\n- **PostgreSQL**: Para memória do chat\n- **PDPJ**: CPF e senha no sub-workflow de login\n\n### 2. Sub-workflows:\nCada tool deve apontar para um sub-workflow específico:\n- login_pdpj_sub\n- consultar_processo_sub\n- consulta_lote_sub\n- gerar_relatorio_sub\n- listar_documentos_sub\n- baixar_documento_sub\n- buscar_processos_sub\n- buscar_jurisprudencia_sub\n- analise_contencioso_sub\n\n### 3. Variáveis de Ambiente:\n```\nPDPJ_CPF=06293234456\nPDPJ_SENHA=Simb@280303\nPDPJ_API_URL=https://portaldeservicos.pdpj.jus.br/api/v2\nAPOIA_API_URL=https://apoia.pdpj.jus.br/api\n```\n\n### 4. Storage Persistente:\nO token é salvo em staticData global",
+        "height": 880,
+        "width": 580
+      },
+      "id": "2d56021a-5ec6-4b9d-b77f-cfbcb0b5ccec",
+      "name": "Configuração",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1620,
+        -420
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1-mini"
+        },
+        "options": {
+          "frequencyPenalty": 0.1,
+          "maxTokens": 4000,
+          "responseFormat": "text",
+          "presencePenalty": 0.1,
+          "temperature": 0.3,
+          "timeout": 60000,
+          "maxRetries": 2,
+          "topP": 0.9
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        80,
+        160
+      ],
+      "id": "ebd5102e-8830-4ff0-ad85-19f3803438c1",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "VQ3UGBDEJ54kzti3",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        360
+      ],
+      "id": "0bb86d8c-3fff-4dc1-857d-6565c314304f",
+      "name": "When clicking ‘Execute workflow’",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Primeiro, verificar se as tabelas existem\nSELECT table_name \nFROM information_schema.tables \nWHERE table_schema = 'public' \nAND table_name LIKE '%chat%'\nORDER BY table_name;\n\n-- Criar índice apenas na tabela pdpj_tokens (que já existe)\nCREATE INDEX IF NOT EXISTS idx_pdpj_tokens_composite \nON pdpj_tokens(token_key, expires_at);\n\n-- Função para limpeza automática\nCREATE OR REPLACE FUNCTION cleanup_expired_tokens()\nRETURNS void AS $$\nBEGIN\n  DELETE FROM pdpj_tokens \n  WHERE expires_at < EXTRACT(EPOCH FROM NOW()) * 1000;\nEND;\n$$ LANGUAGE plpgsql;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -180,
+        360
+      ],
+      "id": "59f3c4f3-6f55-4f16-bfe8-eadba20d6423",
+      "name": "Postgres",
+      "credentials": {
+        "postgres": {
+          "id": "yaadLkWVMaWfr0vx",
+          "name": "Postgres account Railway"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Ver todas as tabelas\nSELECT table_name \nFROM information_schema.tables \nWHERE table_schema = 'public' \nORDER BY table_name;\n\n-- Testar inserção\nINSERT INTO pdpj_tokens (token_key, access_token, expires_at)\nVALUES ('teste', 'token_teste_123', 9999999999999)\nON CONFLICT (token_key) DO UPDATE \nSET access_token = 'token_teste_123';\n\n-- Ver o registro\nSELECT * FROM pdpj_tokens;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        80,
+        380
+      ],
+      "id": "7715a79d-7361-4c64-9f3a-5980cd764b08",
+      "name": "Postgres1",
+      "credentials": {
+        "postgres": {
+          "id": "yaadLkWVMaWfr0vx",
+          "name": "Postgres account Railway"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {}
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -360,
+        -260
+      ],
+      "id": "ef14ed3a-c505-430d-ab96-c6cddc433d69",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "description": "Consulta dados completos de um processo judicial específico no PDPJ ou ApoIA",
+        "workflowId": {
+          "__rl": true,
+          "value": "bE1PwRk5KHdLVHjc",
+          "mode": "list",
+          "cachedResultName": "SUB-WORKFLOW 2 - Consultar Processo"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "numeroProcesso": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('numeroProcesso', ``, 'string') }}",
+            "fonte": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('fonte', ``, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "numeroProcesso",
+              "displayName": "numeroProcesso",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "fonte",
+              "displayName": "fonte",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        500,
+        -180
+      ],
+      "id": "cf370157-cb8a-4a6a-a526-a22974395a53",
+      "name": "consultar_processo"
+    },
+    {
+      "parameters": {
+        "description": "Consulta múltiplos processos de uma vez (até 50 processos)",
+        "workflowId": {
+          "__rl": true,
+          "value": "4WXoXlZDVXCXanll",
+          "mode": "list",
+          "cachedResultName": "SUB-WORKFLOW 3 - Consulta em Lote"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "numerosProcessos": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('numerosProcessos', ``, 'string') }}"
+          },
+          "matchingColumns": [
+            "numerosProcessos"
+          ],
+          "schema": [
+            {
+              "id": "numerosProcessos",
+              "displayName": "numerosProcessos",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        860,
+        -60
+      ],
+      "id": "1047cd4a-7531-495f-b645-135afc0a4dbb",
+      "name": "consulta_lote"
+    },
+    {
+      "parameters": {
+        "description": "Realiza login no sistema PDPJ e obtém access_token para autenticação. SEMPRE use esta ferramenta primeiro antes de qualquer consulta.",
+        "workflowId": {
+          "__rl": true,
+          "value": "gBuv1OdwwrFlg23a",
+          "mode": "list",
+          "cachedResultName": "SUB-WORKFLOW 1 - Autenticação PDPJ"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "forceNewLogin": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('forceNewLogin', `Forçar novo login mesmo com token válido`, 'boolean') }}"
+          },
+          "matchingColumns": [
+            "forceNewLogin"
+          ],
+          "schema": [
+            {
+              "id": "forceNewLogin",
+              "displayName": "forceNewLogin",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        -100
+      ],
+      "id": "873eb706-0ee9-41f1-aed2-95e4d3290135",
+      "name": "login_pdpj"
+    },
+    {
+      "parameters": {
+        "description": "Busca jurisprudência relacionada ao processo ou tema específico.",
+        "workflowId": {
+          "__rl": true,
+          "value": "uRYiUWqCUOjQm1c0",
+          "mode": "list",
+          "cachedResultName": "SUB-WORKFLOW 8 - Buscar Jurisprudencia"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "termos": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('termos', ``, 'string') }}",
+            "numeroProcesso": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('numeroProcesso', ``, 'string') }}",
+            "tribunal": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('tribunal', ``, 'string') }}",
+            "periodo": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('periodo', ``, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "termos",
+              "displayName": "termos",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "numeroProcesso",
+              "displayName": "numeroProcesso",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "tribunal",
+              "displayName": "tribunal",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "periodo",
+              "displayName": "periodo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        380,
+        260
+      ],
+      "id": "ecb2603f-594f-4cac-a7d5-30f10e721329",
+      "name": "buscar_jurisprudencia"
+    },
+    {
+      "parameters": {
+        "description": "Analisa carteira de contencioso consumidor com métricas e insights.",
+        "workflowId": {
+          "__rl": true,
+          "value": "4BqJ4ca9j1ZbS3nF",
+          "mode": "list",
+          "cachedResultName": "SUB-WORKFLOW 9 - ApoIA Análise Avançada"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "numeroProcesso": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('numeroProcesso', ``, 'string') }}",
+            "tipoAnalise": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('tipoAnalise', ``, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "numeroProcesso",
+              "displayName": "numeroProcesso",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "tipoAnalise",
+              "displayName": "tipoAnalise",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        840,
+        120
+      ],
+      "id": "64470881-08d0-4774-b9ca-60d4c2752c75",
+      "name": "analise_contencioso"
+    },
+    {
+      "parameters": {
+        "description": "Gera relatório completo com resumo do processo e lista de documentos",
+        "workflowId": {
+          "__rl": true,
+          "value": "5zxE5O3v1WgHYfKy",
+          "mode": "list",
+          "cachedResultName": "SUB-WORKFLOW 4 - Gerar Relatório com IA"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "numeroProcesso": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('numeroProcesso', ``, 'string') }}",
+            "tipoRelatorio": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('tipoRelatorio', ``, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "numeroProcesso",
+              "displayName": "numeroProcesso",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "tipoRelatorio",
+              "displayName": "tipoRelatorio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        540,
+        280
+      ],
+      "id": "8e088205-18ed-455d-a072-410a857b7f68",
+      "name": "gerar_relatorio"
+    },
+    {
+      "parameters": {
+        "description": "Lista todos os documentos disponíveis de um processo",
+        "workflowId": {
+          "__rl": true,
+          "value": "85VcD5yqgqolq52Y",
+          "mode": "list",
+          "cachedResultName": "SUB-WORKFLOW 5 - Listar Documentos"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "numeroProcesso": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('numeroProcesso', ``, 'string') }}"
+          },
+          "matchingColumns": [
+            "numeroProcesso"
+          ],
+          "schema": [
+            {
+              "id": "numeroProcesso",
+              "displayName": "numeroProcesso",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        940,
+        300
+      ],
+      "id": "2ef5cbfe-0885-43f7-aee7-a7b9ebc17a85",
+      "name": "listar_documentos"
+    },
+    {
+      "parameters": {
+        "description": "Baixa um documento específico do processo em PDF",
+        "workflowId": {
+          "__rl": true,
+          "value": "sD1niYKN0xFE9sM9",
+          "mode": "list",
+          "cachedResultName": "SUB-WORKFLOW 7 - Buscar Processos"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "tipoBusca": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('tipoBusca', ``, 'string') }}",
+            "valor": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('valor', ``, 'string') }}",
+            "tribunal": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('tribunal', ``, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "tipoBusca",
+              "displayName": "tipoBusca",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "valor",
+              "displayName": "valor",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "tribunal",
+              "displayName": "tribunal",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        1000,
+        100
+      ],
+      "id": "5875ee6d-84df-483c-843d-c1cd8c336cc0",
+      "name": "buscar_processos"
+    },
+    {
+      "parameters": {
+        "description": "Baixa um documento específico do processo em PDF",
+        "workflowId": {
+          "__rl": true,
+          "value": "IWmDBcIUWI4fH7Ue",
+          "mode": "list",
+          "cachedResultName": "SUB-WORKFLOW 6 - Baixar Documentos"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "numeroProcesso": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('numeroProcesso', ``, 'string') }}",
+            "tipo": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('tipo', ``, 'string') }}",
+            "documentIds": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('documentIds', ``, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "numeroProcesso",
+              "displayName": "numeroProcesso",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "tipo",
+              "displayName": "tipo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "documentIds",
+              "displayName": "documentIds",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        760,
+        300
+      ],
+      "id": "225cb049-9726-4b32-86e2-20fa3bff3921",
+      "name": "baixar_documento"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.toolThink",
+      "typeVersion": 1,
+      "position": [
+        1080,
+        220
+      ],
+      "id": "d52b7459-ae9a-4e8a-939e-a72b467c5281",
+      "name": "Think"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Gerenciador Global de Tokens e Sessões\nconst staticData = $getWorkflowStaticData('global');\n\n// Inicializar storage\nif (!staticData.pdpj_auth) {\n  staticData.pdpj_auth = {\n    access_token: null,\n    refresh_token: null,\n    token_type: 'Bearer',\n    expires_at: 0,\n    timestamp: 0\n  };\n}\n\nif (!staticData.apoiaSession) {\n  staticData.apoiaSession = {\n    sessionToken: null,\n    cookieString: null,\n    cookies: {},\n    timestamp: 0,\n    expiresAt: 0\n  };\n}\n\nif (!staticData.cache) {\n  staticData.cache = {\n    processos: {},\n    jurisprudencia: {},\n    last_cleanup: Date.now()\n  };\n}\n\n// Limpeza de cache otimizada\nconst CACHE_TTL = {\n  processos: 3600000, // 1 hora\n  jurisprudencia: 86400000 // 24 horas\n};\n\nconst now = Date.now();\nif (now - staticData.cache.last_cleanup > 3600000) {\n  let cleaned = 0;\n  \n  // Limpar processos antigos\n  for (const key in staticData.cache.processos) {\n    if (now - staticData.cache.processos[key].timestamp > CACHE_TTL.processos) {\n      delete staticData.cache.processos[key];\n      cleaned++;\n    }\n  }\n  \n  // Limpar jurisprudência antiga\n  for (const key in staticData.cache.jurisprudencia) {\n    if (now - staticData.cache.jurisprudencia[key].timestamp > CACHE_TTL.jurisprudencia) {\n      delete staticData.cache.jurisprudencia[key];\n      cleaned++;\n    }\n  }\n  \n  staticData.cache.last_cleanup = now;\n  console.log(`🧹 Cache cleanup: ${cleaned} itens removidos`);\n}\n\n// Status report\nconsole.log(`📊 Status do Sistema:\n- Token PDPJ: ${staticData.pdpj_auth.access_token ? 'Válido' : 'Ausente'}\n- Sessão Apoia: ${staticData.apoiaSession.sessionToken ? 'Válida' : 'Ausente'}\n- Cache Processos: ${Object.keys(staticData.cache.processos).length} itens\n- Cache Jurisprudência: ${Object.keys(staticData.cache.jurisprudencia || {}).length} itens\n`);\n\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -220,
+        20
+      ],
+      "id": "3b019293-1428-4a32-9e7e-e5714cd598bd",
+      "name": "Token Manager"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM pdpj_tokens \nWHERE expires_at < $1 \nOR updated_at < CURRENT_TIMESTAMP - INTERVAL '7 days';",
+        "options": {
+          "queryReplacement": "={{ Date.now() }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -120,
+        -280
+      ],
+      "id": "0c33100d-300e-48be-b197-42637ec8f191",
+      "name": "Limpeza",
+      "credentials": {
+        "postgres": {
+          "id": "yaadLkWVMaWfr0vx",
+          "name": "Postgres account Railway"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "Você é o Assistente Jurídico Especializado da Midea Carrier, um sistema avançado de consulta e análise processual com expertise em direito do consumidor e gestão de contencioso.\n\n## 🎯 IDENTIDADE E PROPÓSITO\n\nVocê é um assistente jurídico altamente qualificado que:\n- Consulta e analiza processos judiciais via PDPJ (base CNJ) e ApoIA (base Datalake/Codex com IA)\n- Especialista em direito do consumidor aplicado a climatização e eletrodomésticos\n- Analisa riscos processuais e identifica oportunidades jurídicas\n- Gerencia eficientemente demandas judiciais da Midea Carrier\n\n## 🔐 GESTÃO DE AUTENTICAÇÃO\n\n### Sistema PDPJ (OAuth Keycloak)\n- **Token Bearer**: Válido por 1 hora, renovável via refresh token\n- **Armazenamento**: PostgreSQL e staticData global\n- **Renovação automática**: Quando expirado ou erro 401\n\n### Sistema ApoIA (NextAuth Cookies)\n- **Sessão via cookies**: Válida por 23 horas\n- **Autenticação SSO**: Usa token PDPJ para estabelecer sessão\n- **Renovação**: Via ferramenta login_apoia quando necessário\n\n### Fluxo de Autenticação Inteligente:\n1. **NUNCA** faça login automaticamente no início da conversa\n2. **SEMPRE** verifique tokens/sessões existentes antes de qualquer operação\n3. **Só execute login** quando receber erro de autenticação\n4. **Reutilize** tokens válidos entre consultas\n\n## 🛠️ FERRAMENTAS DISPONÍVEIS\n\n1. **login_pdpj**: Autenticação OAuth no PDPJ\n   - Uso: Apenas quando token expirado ou inexistente\n   - Retorna: access_token, refresh_token, expires_in\n\n2. **login_apoia**: Estabelece sessão Apoia via SSO\n   - Parâmetros: pdpjToken (opcional - busca do staticData)\n   - Uso: Quando precisar features exclusivas do Apoia\n   - Retorna: sessionToken, cookieString, expiresAt\n\n3. **consultar_processo**: Consulta processual inteligente\n   - Parâmetros: numeroProcesso, fonte (auto/pdpj/apoia)\n   - Estratégia padrão: PDPJ primeiro, Apoia como fallback ou para IA\n\n4. **consulta_lote**: Múltiplas consultas (até 50)\n   - Otimizado para análises em massa\n   - Usa cache para evitar duplicações\n\n5. **gerar_relatorio**: Relatório com análise IA\n   - Tipos: executivo, detalhado, risco, comparativo\n\n6. **listar_documentos**: Lista peças processuais\n   - PDPJ: Links para download\n   - Apoia: Preview inline + análise\n\n7. **baixar_documento**: Download de documentos\n   - Suporta múltiplos formatos\n   - Integração com análise IA\n\n8. **buscar_processos**: Busca por CPF/CNPJ/Nome\n   - Filtros: tribunal, período, status\n\n9. **buscar_jurisprudencia**: Pesquisa casos similares\n   - Usa IA do Apoia para relevância\n   - Análise de tendências\n\n10. **analise_contencioso**: Métricas e insights\n    - Dashboard executivo\n    - Análise preditiva\n\n## 📊 ESTRATÉGIA DE CONSULTA\n\n### Quando usar PDPJ (padrão):\n- Dados processuais oficiais CNJ\n- Primeira tentativa sempre\n- Informações certificadas\n- Valores e partes oficiais\n\n### Quando usar ApoIA (features avançadas):\n- Análise com IA do processo\n- Busca por jurisprudência similar\n- Preview de documentos inline\n- Resumos automáticos\n- Análise de tendências\n- Identificação de padrões\n\n### Decisão Inteligente (fonte='auto'):\nSe precisar IA, preview de documentos ou jurisprudência → use Apoia\nSe precisar dados oficiais ou primeira tentativa → use PDPJ\n\n## 🔄 FLUXO DE TRABALHO OTIMIZADO\n\n### 1. Início da Conversa\n- Apresente-se cordialmente\n- NÃO faça login automaticamente\n- Aguarde solicitação específica\n- Sugira funcionalidades disponíveis\n\n### 2. Primeira Consulta\n1. Normalize número do processo para CNJ\n2. Verifique cache local\n3. Se cache válido (<1h) → retorne dados\n4. Senão → verifique token PDPJ\n5. Se token inválido → use login_pdpj\n6. Execute consulta com estratégia apropriada\n7. Salve resultado no cache\n\n### 3. Consultas com Apoia\n1. Verifique sessão Apoia no staticData\n2. Se sessão inválida/expirada:\n   - Verifique token PDPJ\n   - Execute login_apoia com pdpjToken\n3. Execute consulta no Apoia\n4. Em caso de erro → fallback para PDPJ\n\nVocê é o Assistente Jurídico Especializado da Midea Carrier, um sistema avançado de consulta e análise processual com expertise em direito do consumidor e gestão de contencioso.\n\n## 🎯 IDENTIDADE E PROPÓSITO\n\nVocê é um assistente jurídico altamente qualificado que:\n- Consulta e analiza processos judiciais via PDPJ (base CNJ) e ApoIA (base Datalake/Codex com IA)\n- Especialista em direito do consumidor aplicado a climatização e eletrodomésticos\n- Analisa riscos processuais e identifica oportunidades jurídicas\n- Gerencia eficientemente demandas judiciais da Midea Carrier\n\n## 🔐 GESTÃO DE AUTENTICAÇÃO\n\n### Sistema PDPJ (OAuth Keycloak)\n- **Token Bearer**: Válido por 1 hora, renovável via refresh token\n- **Armazenamento**: PostgreSQL e staticData global\n- **Renovação automática**: Quando expirado ou erro 401\n\n### Sistema ApoIA (NextAuth Cookies)\n- **Sessão via cookies**: Válida por 23 horas\n- **Autenticação SSO**: Usa token PDPJ para estabelecer sessão\n- **Renovação**: Via ferramenta login_apoia quando necessário\n\n### Fluxo de Autenticação Inteligente:\n1. **NUNCA** faça login automaticamente no início da conversa\n2. **SEMPRE** verifique tokens/sessões existentes antes de qualquer operação\n3. **Só execute login** quando receber erro de autenticação\n4. **Reutilize** tokens válidos entre consultas\n\n## 🛠️ FERRAMENTAS DISPONÍVEIS\n\n1. **login_pdpj**: Autenticação OAuth no PDPJ\n   - Uso: Apenas quando token expirado ou inexistente\n   - Retorna: access_token, refresh_token, expires_in\n\n2. **login_apoia**: Estabelece sessão Apoia via SSO\n   - Parâmetros: pdpjToken (opcional - busca do staticData)\n   - Uso: Quando precisar features exclusivas do Apoia\n   - Retorna: sessionToken, cookieString, expiresAt\n\n3. **consultar_processo**: Consulta processual inteligente\n   - Parâmetros: numeroProcesso, fonte (auto/pdpj/apoia)\n   - Estratégia padrão: PDPJ primeiro, Apoia como fallback ou para IA\n\n4. **consulta_lote**: Múltiplas consultas (até 50)\n   - Otimizado para análises em massa\n   - Usa cache para evitar duplicações\n\n5. **gerar_relatorio**: Relatório com análise IA\n   - Tipos: executivo, detalhado, risco, comparativo\n\n6. **listar_documentos**: Lista peças processuais\n   - PDPJ: Links para download\n   - Apoia: Preview inline + análise\n\n7. **baixar_documento**: Download de documentos\n   - Suporta múltiplos formatos\n   - Integração com análise IA\n\n8. **buscar_processos**: Busca por CPF/CNPJ/Nome\n   - Filtros: tribunal, período, status\n\n9. **buscar_jurisprudencia**: Pesquisa casos similares\n   - Usa IA do Apoia para relevância\n   - Análise de tendências\n\n10. **analise_contencioso**: Métricas e insights\n    - Dashboard executivo\n    - Análise preditiva\n\n## 📊 ESTRATÉGIA DE CONSULTA\n\n### Quando usar PDPJ (padrão):\n- Dados processuais oficiais CNJ\n- Primeira tentativa sempre\n- Informações certificadas\n- Valores e partes oficiais\n\n### Quando usar ApoIA (features avançadas):\n- Análise com IA do processo\n- Busca por jurisprudência similar\n- Preview de documentos inline\n- Resumos automáticos\n- Análise de tendências\n- Identificação de padrões\n\n### Decisão Inteligente (fonte='auto'):\nSe precisar IA, preview de documentos ou jurisprudência → use Apoia\nSe precisar dados oficiais ou primeira tentativa → use PDPJ\n\n## 🔄 FLUXO DE TRABALHO OTIMIZADO\n\n### 1. Início da Conversa\n- Apresente-se cordialmente\n- NÃO faça login automaticamente\n- Aguarde solicitação específica\n- Sugira funcionalidades disponíveis\n\n### 2. Primeira Consulta\n1. Normalize número do processo para CNJ\n2. Verifique cache local\n3. Se cache válido (<1h) → retorne dados\n4. Senão → verifique token PDPJ\n5. Se token inválido → use login_pdpj\n6. Execute consulta com estratégia apropriada\n7. Salve resultado no cache\n\n### 3. Consultas com Apoia\n1. Verifique sessão Apoia no staticData\n2. Se sessão inválida/expirada:\n   - Verifique token PDPJ\n   - Execute login_apoia com pdpjToken\n3. Execute consulta no Apoia\n4. Em caso de erro → fallback para PDPJ\n\n## 📋 FORMATO DE RESPOSTAS\n\n### Consulta de Processo Individual:\n\n📋 **PROCESSO**: [número formatado CNJ]\n⚖️ **CLASSE**: [classe processual] (Código: [código])\n📅 **DISTRIBUIÇÃO**: [data formatada]\n💰 **VALOR DA CAUSA**: [valor formatado BRL]\n\n👥 **PARTES**:\n- **Autor(es)**: [nome] ([tipo documento]: [número])\n- **Réu(s)**: [nome] ([tipo documento]: [número])\n\n📊 **STATUS ATUAL**: [situação]\n📍 **LOCALIZAÇÃO**: [vara] - [comarca/tribunal]\n🔒 **Sigilo**: [Sim/Não] | 💳 **Gratuidade**: [Sim/Não]\n\n📈 **MOVIMENTAÇÕES**: [total] registros\n- Última: [data] - [descrição]\n\n🔍 **ANÁLISE ESPECÍFICA MIDEA CARRIER**:\n[Análise contextualizada considerando:]\n- Produtos identificados: [lista]\n- Tipo de demanda: [defeito/garantia/recall]\n- Risco estimado: [baixo/médio/alto]\n- Precedentes similares: [quantidade]\n\n⚠️ **ALERTAS E RISCOS**:\n- [Risco identificado com impacto]\n- [Prazo processual relevante]\n\n💡 **RECOMENDAÇÕES ESTRATÉGICAS**:\n1. [Ação prioritária com justificativa]\n2. [Estratégia preventiva sugerida]\n\n🔗 **Links Úteis**:\n- [Visualizar processo]\n- [Download de peças] (se disponível)\n\n📊 **Fonte dos dados**: [PDPJ/ApoIA/Ambas]\n\n### Consulta em Lote:\n- Use tabela resumida para visão geral\n- Destaque processos críticos\n- Agrupe por tipo/risco/status\n- Forneça estatísticas consolidadas\n\n## ⚠️ TRATAMENTO DE ERROS\n\n### Erros de Autenticação:\n- **401 Unauthorized**: Execute login apropriado\n- **Token expirado**: Renove automaticamente\n- **Sessão inválida**: Re-autentique via SSO\n\n### Erros de API:\n- **500 Internal Server**: Tente fallback\n- **404 Not Found**: Verifique número/formato\n- **Timeout**: Retry com backoff exponencial\n\n### Mensagens ao usuário:\n❌ **Erro temporário**: [descrição simplificada]\n🔄 **Ação tomada**: [o que está sendo feito]\n✅ **Alternativa**: [sugestão de contorno]\n\n## 🎯 DIRETRIZES ESPECÍFICAS MIDEA CARRIER\n\n### 1. Análise de Produtos:\n- Ar condicionado (split, inverter, window)\n- Refrigeradores (frost free, side by side)\n- Lava e seca\n- Micro-ondas\n- Identificar modelo/série quando disponível\n\n### 2. Padrões de Risco:\n- **Alto**: Recall, ação coletiva, dano moral coletivo\n- **Médio**: Defeitos recorrentes, má-fé processual\n- **Baixo**: Casos isolados, acordos viáveis\n\n### 3. Compliance e LGPD:\n- Jamais exponha dados sensíveis desnecessariamente\n- Use máscaras em documentos quando apropriado\n- Mantenha log de acessos para auditoria\n\n### 4. Proatividade Estratégica:\n- Identifique escritórios que atuam em massa\n- Detecte padrões de litigância\n- Sugira ações preventivas\n- Recomende melhorias em produtos/serviços\n\n## 🚀 OTIMIZAÇÕES PERFORMANCE\n\n1. **Cache Inteligente**:\n   - Processos: 1 hora\n   - Tokens: Até expiração\n   - Jurisprudência: 24 horas\n\n2. **Paralelização**:\n   - Consultas em lote: até 10 paralelas\n   - Merge de resultados otimizado\n\n3. **Compressão**:\n   - Respostas grandes: resumo + detalhes expansíveis\n   - Documentos: links ao invés de embed\n\n## 📝 LEMBRETES CRÍTICOS\n\n1. Você representa os interesses jurídicos da Midea Carrier\n2. Mantenha postura profissional e técnica sempre\n3. Precisão > Velocidade (mas seja eficiente)\n4. Documente decisões para auditoria\n5. Escale casos complexos quando necessário\n6. NUNCA faça login desnecessariamente\n7. SEMPRE verifique recursos existentes primeiro\n8. Considere custo/benefício de cada consulta\n\nTermine suas respostas perguntando se há algo mais em que possa ajudar ou se o usuário deseja alguma análise adicional específica.\n\n### Consulta em Lote:\n- Use tabela resumida para visão geral\n- Destaque processos críticos\n- Agrupe por tipo/risco/status\n- Forneça estatísticas consolidadas\n\n## ⚠️ TRATAMENTO DE ERROS\n\n### Erros de Autenticação:\n- **401 Unauthorized**: Execute login apropriado\n- **Token expirado**: Renove automaticamente\n- **Sessão inválida**: Re-autentique via SSO\n\n### Erros de API:\n- **500 Internal Server**: Tente fallback\n- **404 Not Found**: Verifique número/formato\n- **Timeout**: Retry com backoff exponencial\n\n### Mensagens ao usuário:\n❌ **Erro temporário**: [descrição simplificada]\n🔄 **Ação tomada**: [o que está sendo feito]\n✅ **Alternativa**: [sugestão de contorno]\n\n## 🎯 DIRETRIZES ESPECÍFICAS MIDEA CARRIER\n\n### 1. Análise de Produtos:\n- Ar condicionado (split, inverter, window)\n- Refrigeradores (frost free, side by side)\n- Lava e seca\n- Micro-ondas\n- Identificar modelo/série quando disponível\n\n### 2. Padrões de Risco:\n- **Alto**: Recall, ação coletiva, dano moral coletivo\n- **Médio**: Defeitos recorrentes, má-fé processual\n- **Baixo**: Casos isolados, acordos viáveis\n\n### 3. Compliance e LGPD:\n- Jamais exponha dados sensíveis desnecessariamente\n- Use máscaras em documentos quando apropriado\n- Mantenha log de acessos para auditoria\n\n### 4. Proatividade Estratégica:\n- Identifique escritórios que atuam em massa\n- Detecte padrões de litigância\n- Sugira ações preventivas\n- Recomende melhorias em produtos/serviços\n\n## 🚀 OTIMIZAÇÕES PERFORMANCE\n\n1. **Cache Inteligente**:\n   - Processos: 1 hora\n   - Tokens: Até expiração\n   - Jurisprudência: 24 horas\n\n2. **Paralelização**:\n   - Consultas em lote: até 10 paralelas\n   - Merge de resultados otimizado\n\n3. **Compressão**:\n   - Respostas grandes: resumo + detalhes expansíveis\n   - Documentos: links ao invés de embed\n\n## 📝 LEMBRETES CRÍTICOS\n\n1. Você representa os interesses jurídicos da Midea Carrier\n2. Mantenha postura profissional e técnica sempre\n3. Precisão > Velocidade (mas seja eficiente)\n4. Documente decisões para auditoria\n5. Escale casos complexos quando necessário\n6. NUNCA faça login desnecessariamente\n7. SEMPRE verifique recursos existentes primeiro\n8. Considere custo/benefício de cada consulta\n\nTermine suas respostas perguntando se há algo mais em que possa ajudar ou se o usuário deseja alguma análise adicional específica.",
+          "returnIntermediateSteps": true
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        120,
+        0
+      ],
+      "id": "999742a2-87ee-4fcc-a983-66042189f7e9",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "tableName": "chat_memory_midea",
+        "contextWindowLength": 8
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        220,
+        160
+      ],
+      "id": "2505ee84-efc7-4ad2-9d7e-0e8b05bcc983",
+      "name": "Postgres Chat Memory",
+      "credentials": {
+        "postgres": {
+          "id": "tXYah3N1LRF1cZoi",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "description": "Estabelece sessão Apoia via SSO com token PDPJ",
+        "workflowId": {
+          "__rl": true,
+          "value": "GxZAjjfpsqit1RXM",
+          "mode": "list",
+          "cachedResultName": "SUB-WORKFLOW - Login Apoia SSO"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "forceNewLogin": false,
+            "pdpjToken": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('pdpjToken', `Access token do PDPJ (opcional - busca do staticData se não fornecido)`, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "pdpjToken",
+              "displayName": "pdpjToken",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "forceNewLogin",
+              "displayName": "forceNewLogin",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        1140,
+        20
+      ],
+      "id": "7bcb3707-ab20-4d0c-8331-e58e1a2bf9ad",
+      "name": "login_apoia"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Token Manager",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres": {
+      "main": [
+        []
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Limpeza",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "consultar_processo": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "consulta_lote": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "login_pdpj": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "buscar_jurisprudencia": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "analise_contencioso": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "gerar_relatorio": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "listar_documentos": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "buscar_processos": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "baixar_documento": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Think": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Token Manager": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "login_apoia": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "3af4c3f6-d101-44a4-8be1-498c49e5ec62",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "9601c2da077393e3c7d395982728b7744de7ac7dd087f4789f3781b83e316e6e"
+  },
+  "id": "877tHwcTVtW2LnvD",
+  "tags": [
+    {
+      "createdAt": "2025-06-06T17:41:49.479Z",
+      "updatedAt": "2025-06-06T17:41:49.479Z",
+      "id": "bbYE4vVexO2gKvZd",
+      "name": "PDPJ"
+    },
+    {
+      "createdAt": "2025-06-08T06:50:28.800Z",
+      "updatedAt": "2025-06-08T06:50:28.800Z",
+      "id": "8yeTsoRdo0xgsccg",
+      "name": "Jurídico"
+    },
+    {
+      "createdAt": "2025-06-08T06:50:28.801Z",
+      "updatedAt": "2025-06-08T06:50:28.801Z",
+      "id": "IWc4f3boxi66xcAr",
+      "name": "Midea Carrier"
+    },
+    {
+      "createdAt": "2025-06-08T06:50:28.805Z",
+      "updatedAt": "2025-06-08T06:50:28.805Z",
+      "id": "L9Q9XGdpEvxNYhEo",
+      "name": "AI Agent"
+    }
+  ]
+}

@@ -1,0 +1,210 @@
+{
+  "name": "SUB-WORKFLOW 5 - Listar Documentos",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "numeroProcesso"
+            }
+          ]
+        }
+      },
+      "id": "b4059c6d-8b8a-4126-9e99-5a4c31df765b",
+      "name": "Input Processo",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1.1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Preparar consulta de documentos\nconst numeroProcesso = $json.numeroProcesso.replace(/[^0-9]/g, '');\n\n// Buscar token\nconst staticData = $getWorkflowStaticData('global');\nconst auth = staticData.pdpj_auth;\n\nif (!auth || !auth.access_token) {\n    throw new Error('Token não encontrado. Execute autenticação primeiro.');\n}\n\nreturn {\n    numeroLimpo: numeroProcesso,\n    numeroFormatado: numeroProcesso.replace(\n        /(\\d{7})(\\d{2})(\\d{4})(\\d{1})(\\d{2})(\\d{4})/,\n        '$1-$2.$3.$4.$5.$6'\n    ),\n    token: auth.access_token,\n    tokenType: auth.token_type\n};"
+      },
+      "id": "4164882e-e6f0-44c1-8c01-26ce329e45ab",
+      "name": "Prepare Request",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        200,
+        0
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "url": "=https://portaldeservicos.pdpj.jus.br/api/v2/processos/{{ $json.numeroLimpo }}/documentos",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $json.tokenType }} {{ $json.token }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "f0f5942d-bbe3-4acb-99bb-6417f8c2c7d7",
+      "name": "Get Documents PDPJ",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        400,
+        0
+      ],
+      "typeVersion": 4.2,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.statusCode || 200 }}",
+              "operation": "equal",
+              "value2": 200
+            }
+          ]
+        }
+      },
+      "id": "6a9817d3-4374-449a-a58e-4a67cb152cf0",
+      "name": "Success?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        600,
+        0
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "=https://api.apoia.pdpj.jus.br/v1/processos/{{ $node['Prepare Request'].json.numeroLimpo }}/documentos",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $node['Prepare Request'].json.tokenType }} {{ $node['Prepare Request'].json.token }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "74c3b8ed-6292-4575-a3b2-7b323b1b7401",
+      "name": "Try ApoIA Documents",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        800,
+        80
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Processar lista de documentos\nconst response = $input.first().json;\nconst numeroProcesso = $node['Prepare Request'].json.numeroFormatado;\n\n// Estruturar documentos\nlet documentos = [];\n\nif (Array.isArray(response)) {\n    documentos = response;\n} else if (response.documentos && Array.isArray(response.documentos)) {\n    documentos = response.documentos;\n} else if (response.data && Array.isArray(response.data)) {\n    documentos = response.data;\n}\n\n// Processar e categorizar documentos\nconst documentosProcessados = documentos.map(doc => {\n    // Identificar tipo de documento\n    let categoria = 'outros';\n    const tipoLower = (doc.tipo || doc.tipoDocumento || '').toLowerCase();\n    const descricaoLower = (doc.descricao || '').toLowerCase();\n    \n    if (tipoLower.includes('inicial') || descricaoLower.includes('inicial')) {\n        categoria = 'peticao_inicial';\n    } else if (tipoLower.includes('contestacao') || descricaoLower.includes('contestacao')) {\n        categoria = 'contestacao';\n    } else if (tipoLower.includes('sentenca') || descricaoLower.includes('sentenca')) {\n        categoria = 'sentenca';\n    } else if (tipoLower.includes('acordao') || descricaoLower.includes('acordao')) {\n        categoria = 'acordao';\n    } else if (tipoLower.includes('recurso') || descricaoLower.includes('recurso')) {\n        categoria = 'recurso';\n    } else if (tipoLower.includes('laudo') || descricaoLower.includes('pericia')) {\n        categoria = 'laudo_pericial';\n    }\n    \n    return {\n        id: doc.id || doc.idDocumento || doc.documentoId,\n        tipo: doc.tipo || doc.tipoDocumento || 'Documento',\n        categoria: categoria,\n        descricao: doc.descricao || doc.nome || 'Sem descrição',\n        dataInclusao: doc.dataInclusao || doc.dataJuntada || doc.data,\n        tamanho: doc.tamanho || doc.size || 'Não informado',\n        paginas: doc.paginas || doc.numeroPaginas || null,\n        assinado: doc.assinado !== false,\n        sigiloso: doc.sigiloso || doc.nivelSigilo > 0,\n        disponivel: doc.disponivel !== false,\n        hash: doc.hash || null,\n        urlDownload: doc.urlDownload || null\n    };\n});\n\n// Agrupar por categoria\nconst documentosPorCategoria = {};\ndocumentosProcessados.forEach(doc => {\n    if (!documentosPorCategoria[doc.categoria]) {\n        documentosPorCategoria[doc.categoria] = [];\n    }\n    documentosPorCategoria[doc.categoria].push(doc);\n});\n\n// Identificar documentos principais\nconst documentosPrincipais = documentosProcessados.filter(doc => \n    ['peticao_inicial', 'contestacao', 'sentenca', 'acordao'].includes(doc.categoria)\n);\n\n// Estatísticas\nconst estatisticas = {\n    total: documentosProcessados.length,\n    porCategoria: Object.keys(documentosPorCategoria).map(cat => ({\n        categoria: cat,\n        quantidade: documentosPorCategoria[cat].length\n    })),\n    principais: documentosPrincipais.length,\n    sigilosos: documentosProcessados.filter(d => d.sigiloso).length\n};\n\nreturn {\n    sucesso: true,\n    numeroProcesso: numeroProcesso,\n    documentos: documentosProcessados,\n    documentosPorCategoria: documentosPorCategoria,\n    documentosPrincipais: documentosPrincipais,\n    estatisticas: estatisticas,\n    mensagem: `Encontrados ${documentosProcessados.length} documentos no processo`\n};"
+      },
+      "id": "263f306a-089e-416d-86ad-14a96caffe87",
+      "name": "Process Documents",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1000,
+        0
+      ],
+      "typeVersion": 2
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Input Processo": {
+      "main": [
+        [
+          {
+            "node": "Prepare Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Request": {
+      "main": [
+        [
+          {
+            "node": "Get Documents PDPJ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Documents PDPJ": {
+      "main": [
+        [
+          {
+            "node": "Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Success?": {
+      "main": [
+        [
+          {
+            "node": "Process Documents",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Try ApoIA Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Try ApoIA Documents": {
+      "main": [
+        [
+          {
+            "node": "Process Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "ef24acef-3090-411e-99ea-e5bb95bf9807",
+  "meta": {
+    "instanceId": "9601c2da077393e3c7d395982728b7744de7ac7dd087f4789f3781b83e316e6e"
+  },
+  "id": "85VcD5yqgqolq52Y",
+  "tags": []
+}

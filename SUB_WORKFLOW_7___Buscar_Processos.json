@@ -1,0 +1,246 @@
+{
+  "name": "SUB-WORKFLOW 7 - Buscar Processos",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "tipoBusca"
+            },
+            {
+              "name": "valor"
+            },
+            {
+              "name": "tribunal"
+            }
+          ]
+        }
+      },
+      "id": "5ca8ff5a-6c8d-4eef-9238-d1089039417c",
+      "name": "Input Search Params",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1.1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Preparar parâmetros de busca\nconst tipoBusca = $json.tipoBusca || 'cpf';\nconst valor = $json.valor;\nconst tribunal = $json.tribunal || '';\n\nif (!valor || valor.trim() === '') {\n    throw new Error('Valor de busca não fornecido');\n}\n\n// Limpar e validar valor baseado no tipo\nlet valorLimpo = valor.trim();\nlet parametroBusca = {};\n\nswitch (tipoBusca) {\n    case 'cpf':\n        // Remover formatação do CPF/CNPJ\n        valorLimpo = valor.replace(/[^0-9]/g, '');\n        if (valorLimpo.length !== 11 && valorLimpo.length !== 14) {\n            throw new Error('CPF/CNPJ inválido. Use 11 dígitos para CPF ou 14 para CNPJ');\n        }\n        parametroBusca = { documento: valorLimpo };\n        break;\n        \n    case 'nome':\n        if (valorLimpo.length < 3) {\n            throw new Error('Nome muito curto. Use pelo menos 3 caracteres');\n        }\n        parametroBusca = { nome: valorLimpo };\n        break;\n        \n    case 'oab':\n        // Formato OAB: LLNNNNN ou LLNNNNN/UF\n        valorLimpo = valor.toUpperCase().replace(/[^A-Z0-9\\/]/g, '');\n        parametroBusca = { oab: valorLimpo };\n        break;\n        \n    default:\n        throw new Error(`Tipo de busca inválido: ${tipoBusca}`);\n}\n\n// Buscar token\nconst staticData = $getWorkflowStaticData('global');\nconst auth = staticData.pdpj_auth;\n\nif (!auth || !auth.access_token) {\n    throw new Error('Token não encontrado. Execute autenticação primeiro.');\n}\n\nconsole.log(`🔍 Buscando processos por ${tipoBusca}: ${valorLimpo}`);\n\nreturn {\n    tipoBusca: tipoBusca,\n    valor: valorLimpo,\n    valorOriginal: valor,\n    tribunal: tribunal,\n    parametroBusca: parametroBusca,\n    token: auth.access_token,\n    tokenType: auth.token_type\n};"
+      },
+      "id": "e44e6dec-17f9-472d-9d97-0cfa71de44a1",
+      "name": "Prepare Search",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        200,
+        0
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "url": "https://portaldeservicos.pdpj.jus.br/api/v2/processos/buscar",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "={{ Object.keys($json.parametroBusca)[0] }}",
+              "value": "={{ Object.values($json.parametroBusca)[0] }}"
+            },
+            {
+              "name": "tribunal",
+              "value": "={{ $json.tribunal }}"
+            },
+            {
+              "name": "limite",
+              "value": "50"
+            },
+            {
+              "name": "pagina",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $json.tokenType }} {{ $json.token }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 45000
+        }
+      },
+      "id": "322ada1b-6bc4-4591-9609-efc882c6a97a",
+      "name": "Search PDPJ API",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        400,
+        0
+      ],
+      "typeVersion": 4.2,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.statusCode || 200 }}",
+              "operation": "equal",
+              "value2": 200
+            }
+          ]
+        }
+      },
+      "id": "f6636f06-a981-4ab3-bcda-5faca61e5132",
+      "name": "PDPJ Success?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        600,
+        0
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "https://api.apoia.pdpj.jus.br/v1/processos/buscar",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "={{ Object.keys($node['Prepare Search'].json.parametroBusca)[0] }}",
+              "value": "={{ Object.values($node['Prepare Search'].json.parametroBusca)[0] }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $node['Prepare Search'].json.tokenType }} {{ $node['Prepare Search'].json.token }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "d0da3ec1-7f90-40c3-9521-a5a8c54b06c6",
+      "name": "Try ApoIA Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        800,
+        80
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Processar resultados da busca\nconst response = $input.first().json;\nconst searchParams = $node['Prepare Search'].json;\n\n// Extrair lista de processos\nlet processos = [];\n\nif (Array.isArray(response)) {\n    processos = response;\n} else if (response.processos && Array.isArray(response.processos)) {\n    processos = response.processos;\n} else if (response.data && Array.isArray(response.data)) {\n    processos = response.data;\n} else if (response.resultados && Array.isArray(response.resultados)) {\n    processos = response.resultados;\n}\n\n// Processar e enriquecer cada processo\nconst processosProcessados = processos.map(proc => {\n    // Identificar se envolve Midea Carrier\n    const textoCompleto = JSON.stringify(proc).toLowerCase();\n    const envolveMidea = textoCompleto.includes('midea') || textoCompleto.includes('carrier');\n    \n    return {\n        numeroProcesso: proc.numeroProcesso || proc.numero,\n        numeroFormatado: proc.numeroFormatado || formatarNumeroCNJ(proc.numeroProcesso || proc.numero),\n        classe: proc.classe || proc.classeProcessual || 'Não informada',\n        assunto: proc.assunto || proc.assuntos?.[0]?.descricao || 'Não informado',\n        dataDistribuicao: proc.dataDistribuicao || proc.dataAjuizamento,\n        valorCausa: proc.valorCausa || 0,\n        valorCausaFormatado: formatarMoeda(proc.valorCausa || 0),\n        tribunal: proc.tribunal || proc.sistemaOrigem || 'Não informado',\n        orgaoJulgador: proc.orgaoJulgador || proc.vara || 'Não informado',\n        partes: {\n            poloAtivo: proc.poloAtivo || proc.partesAtivas || [],\n            poloPassivo: proc.poloPassivo || proc.partesPassivas || []\n        },\n        situacao: proc.situacao || proc.status || 'Em andamento',\n        envolveMideaCarrier: envolveMidea,\n        relevanciaParaBusca: calcularRelevancia(proc, searchParams)\n    };\n});\n\n// Ordenar por relevância (Midea primeiro, depois por data)\nprocessosProcessados.sort((a, b) => {\n    if (a.envolveMideaCarrier && !b.envolveMideaCarrier) return -1;\n    if (!a.envolveMideaCarrier && b.envolveMideaCarrier) return 1;\n    return new Date(b.dataDistribuicao) - new Date(a.dataDistribuicao);\n});\n\n// Estatísticas da busca\nconst estatisticas = {\n    total: processosProcessados.length,\n    envolvemMidea: processosProcessados.filter(p => p.envolveMideaCarrier).length,\n    porTribunal: {},\n    porClasse: {},\n    valorTotal: 0\n};\n\nprocessosProcessados.forEach(proc => {\n    // Por tribunal\n    if (!estatisticas.porTribunal[proc.tribunal]) {\n        estatisticas.porTribunal[proc.tribunal] = 0;\n    }\n    estatisticas.porTribunal[proc.tribunal]++;\n    \n    // Por classe\n    if (!estatisticas.porClasse[proc.classe]) {\n        estatisticas.porClasse[proc.classe] = 0;\n    }\n    estatisticas.porClasse[proc.classe]++;\n    \n    // Valor total\n    estatisticas.valorTotal += proc.valorCausa || 0;\n});\n\nestatisticas.valorTotalFormatado = formatarMoeda(estatisticas.valorTotal);\n\n// Funções auxiliares\nfunction formatarNumeroCNJ(numero) {\n    if (!numero || typeof numero !== 'string') return numero;\n    const limpo = numero.replace(/[^0-9]/g, '');\n    if (limpo.length !== 20) return numero;\n    return limpo.replace(/(\\d{7})(\\d{2})(\\d{4})(\\d{1})(\\d{2})(\\d{4})/, '$1-$2.$3.$4.$5.$6');\n}\n\nfunction formatarMoeda(valor) {\n    return new Intl.NumberFormat('pt-BR', {\n        style: 'currency',\n        currency: 'BRL'\n    }).format(valor || 0);\n}\n\nfunction calcularRelevancia(processo, params) {\n    let score = 0;\n    const textoProc = JSON.stringify(processo).toLowerCase();\n    const valorBusca = params.valor.toLowerCase();\n    \n    // Relevância por correspondência exata\n    if (textoProc.includes(valorBusca)) score += 10;\n    \n    // Relevância por tipo de busca\n    if (params.tipoBusca === 'cpf' && processo.cpf === params.valor) score += 20;\n    if (params.tipoBusca === 'nome' && processo.nome?.toLowerCase().includes(valorBusca)) score += 15;\n    \n    // Relevância por Midea\n    if (processo.envolveMideaCarrier) score += 25;\n    \n    return score;\n}\n\nreturn {\n    sucesso: true,\n    tipoBusca: searchParams.tipoBusca,\n    valorBusca: searchParams.valorOriginal,\n    tribunal: searchParams.tribunal || 'Todos',\n    totalEncontrados: processosProcessados.length,\n    processos: processosProcessados,\n    estatisticas: estatisticas,\n    mensagem: `Encontrados ${processosProcessados.length} processos${estatisticas.envolvemMidea > 0 ? ` (${estatisticas.envolvemMidea} envolvem Midea Carrier)` : ''}`\n};"
+      },
+      "id": "b75c1296-8b68-4e0a-a532-20fc1e5485c8",
+      "name": "Process Search Results",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1000,
+        0
+      ],
+      "typeVersion": 2
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Input Search Params": {
+      "main": [
+        [
+          {
+            "node": "Prepare Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Search": {
+      "main": [
+        [
+          {
+            "node": "Search PDPJ API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search PDPJ API": {
+      "main": [
+        [
+          {
+            "node": "PDPJ Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PDPJ Success?": {
+      "main": [
+        [
+          {
+            "node": "Process Search Results",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Try ApoIA Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Try ApoIA Search": {
+      "main": [
+        [
+          {
+            "node": "Process Search Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "de772723-84b9-4d7b-a112-5f19683cdd7c",
+  "meta": {
+    "instanceId": "9601c2da077393e3c7d395982728b7744de7ac7dd087f4789f3781b83e316e6e"
+  },
+  "id": "sD1niYKN0xFE9sM9",
+  "tags": []
+}

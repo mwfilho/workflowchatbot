@@ -1,0 +1,192 @@
+{
+  "name": "SUB-WORKFLOW 3 - Consulta em Lote",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "numerosProcessos"
+            }
+          ]
+        }
+      },
+      "id": "c81000d8-ba05-4e9a-b292-b7a496302b4e",
+      "name": "Input Números",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1.1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Processar lista de números\nconst numerosInput = $json.numerosProcessos;\n\n// Separar números por vírgula, ponto-vírgula ou nova linha\nconst numeros = numerosInput\n    .split(/[,;\\n]/)\n    .map(n => n.trim())\n    .filter(n => n.length > 0)\n    .map(n => n.replace(/[^0-9]/g, ''));\n\n// Validar limite de 50 processos\nif (numeros.length > 50) {\n    throw new Error(`Limite excedido: máximo 50 processos por vez (recebido: ${numeros.length})`);\n}\n\n// Validar formato de cada número\nconst numerosValidos = [];\nconst numerosInvalidos = [];\n\nnumeros.forEach(num => {\n    if (num.length === 20) {\n        numerosValidos.push({\n            numeroLimpo: num,\n            numeroFormatado: num.replace(\n                /(\\d{7})(\\d{2})(\\d{4})(\\d{1})(\\d{2})(\\d{4})/,\n                '$1-$2.$3.$4.$5.$6'\n            )\n        });\n    } else {\n        numerosInvalidos.push(num);\n    }\n});\n\nif (numerosInvalidos.length > 0) {\n    console.warn(`⚠️ Números inválidos ignorados: ${numerosInvalidos.join(', ')}`);\n}\n\nif (numerosValidos.length === 0) {\n    throw new Error('Nenhum número de processo válido encontrado');\n}\n\nconsole.log(`📋 Processando ${numerosValidos.length} processos em lote`);\n\nreturn {\n    totalProcessos: numerosValidos.length,\n    processos: numerosValidos,\n    numerosInvalidos: numerosInvalidos\n};"
+      },
+      "id": "aa6697c4-5067-42f6-a164-b12a8291e07c",
+      "name": "Prepare Batch",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        200,
+        0
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      },
+      "id": "779bf8d8-5abc-498e-b49a-6c6b5ce96bee",
+      "name": "Split in Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "position": [
+        400,
+        0
+      ],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "workflowId": "cPY5qorF5THA9PFk",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "88eef386-bb90-46fd-8139-33fdf41bc8c6",
+      "name": "Execute Consulta Individual",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "position": [
+        580,
+        -20
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aguardar entre lotes para evitar rate limit\nconst delay = 1000; // 1 segundo entre lotes\nawait new Promise(resolve => setTimeout(resolve, delay));\n\nreturn $json;"
+      },
+      "id": "a4546c96-be3a-4f38-be58-520b5b351786",
+      "name": "Rate Limit Delay",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        800,
+        0
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $node['Split in Batches'].context['noItemsLeft'] }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "a4adee4f-7573-4928-9c66-cd7bb338134d",
+      "name": "All Processed?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        980,
+        0
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Consolidar resultados\nconst allItems = $input.all();\nconst resultados = {\n    sucesso: [],\n    erro: [],\n    totalProcessados: 0,\n    resumo: {}\n};\n\n// Processar cada resultado\nallItems.forEach(item => {\n    const processo = item.json;\n    \n    if (processo.erro) {\n        resultados.erro.push({\n            numero: processo.numeroProcesso,\n            erro: processo.erro\n        });\n    } else {\n        resultados.sucesso.push(processo);\n        \n        // Análise agregada\n        if (processo.envolveMideaCarrier) {\n            if (!resultados.resumo.processosMidea) {\n                resultados.resumo.processosMidea = 0;\n            }\n            resultados.resumo.processosMidea++;\n            \n            // Contar produtos\n            if (processo.produtosIdentificados) {\n                processo.produtosIdentificados.forEach(produto => {\n                    if (!resultados.resumo.produtosPorTipo) {\n                        resultados.resumo.produtosPorTipo = {};\n                    }\n                    resultados.resumo.produtosPorTipo[produto] = \n                        (resultados.resumo.produtosPorTipo[produto] || 0) + 1;\n                });\n            }\n        }\n        \n        // Contar por tribunal\n        const tribunal = processo.tribunal || 'Não informado';\n        if (!resultados.resumo.porTribunal) {\n            resultados.resumo.porTribunal = {};\n        }\n        resultados.resumo.porTribunal[tribunal] = \n            (resultados.resumo.porTribunal[tribunal] || 0) + 1;\n    }\n});\n\nresultados.totalProcessados = allItems.length;\nresultados.taxaSucesso = (resultados.sucesso.length / resultados.totalProcessados * 100).toFixed(1) + '%';\n\n// Estatísticas adicionais\nif (resultados.sucesso.length > 0) {\n    const valores = resultados.sucesso\n        .map(p => p.valorCausa || 0)\n        .filter(v => v > 0);\n    \n    if (valores.length > 0) {\n        resultados.resumo.valorTotal = valores.reduce((a, b) => a + b, 0);\n        resultados.resumo.valorMedio = resultados.resumo.valorTotal / valores.length;\n        resultados.resumo.valorTotalFormatado = new Intl.NumberFormat('pt-BR', {\n            style: 'currency',\n            currency: 'BRL'\n        }).format(resultados.resumo.valorTotal);\n    }\n}\n\nreturn resultados;"
+      },
+      "id": "b1707be8-f884-4549-856d-7ec7f95e55c7",
+      "name": "Consolidate Results",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1200,
+        -20
+      ],
+      "typeVersion": 2
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Input Números": {
+      "main": [
+        [
+          {
+            "node": "Prepare Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Batch": {
+      "main": [
+        [
+          {
+            "node": "Split in Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split in Batches": {
+      "main": [
+        [
+          {
+            "node": "Execute Consulta Individual",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Consulta Individual": {
+      "main": [
+        [
+          {
+            "node": "Rate Limit Delay",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rate Limit Delay": {
+      "main": [
+        [
+          {
+            "node": "All Processed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "All Processed?": {
+      "main": [
+        [
+          {
+            "node": "Consolidate Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "8270c06c-96b6-40ab-b1df-31b76fe9dd89",
+  "meta": {
+    "instanceId": "9601c2da077393e3c7d395982728b7744de7ac7dd087f4789f3781b83e316e6e"
+  },
+  "id": "4WXoXlZDVXCXanll",
+  "tags": []
+}

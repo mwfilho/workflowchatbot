@@ -1,0 +1,336 @@
+{
+  "name": "SUB-WORKFLOW - Login Apoia SSO",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "pdpjToken"
+            },
+            {
+              "name": "forceNewLogin",
+              "type": "boolean"
+            }
+          ]
+        }
+      },
+      "id": "c055762a-8fe7-4141-a639-df2372f30060",
+      "typeVersion": 1.1,
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        -80,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Verificar sessão Apoia existente e token PDPJ\nconst staticData = $getWorkflowStaticData('global');\nconst forceNew = $input.first().json.forceNewLogin;\nlet pdpjToken = $input.first().json.pdpjToken;\n\n// Se não foi fornecido token, buscar do staticData\nif (!pdpjToken) {\n  if (staticData.pdpj_auth && staticData.pdpj_auth.access_token) {\n    const tokenAge = Date.now() - (staticData.pdpj_auth.timestamp || 0);\n    const tokenValid = tokenAge < (staticData.pdpj_auth.expires_in || 3600) * 1000;\n    \n    if (tokenValid) {\n      pdpjToken = staticData.pdpj_auth.access_token;\n      console.log('✅ Token PDPJ encontrado no staticData');\n    } else {\n      throw new Error('Token PDPJ expirado. Execute login PDPJ primeiro.');\n    }\n  } else {\n    throw new Error('Token PDPJ não encontrado. Execute login PDPJ primeiro.');\n  }\n}\n\n// Verificar sessão Apoia existente\nif (!forceNew && staticData.apoiaSession) {\n  const sessionAge = Date.now() - (staticData.apoiaSession.timestamp || 0);\n  const maxAge = 23 * 60 * 60 * 1000; // 23 horas\n  \n  if (sessionAge < maxAge && staticData.apoiaSession.cookies) {\n    console.log('✅ Sessão Apoia válida encontrada');\n    return {\n      hasValidSession: true,\n      cookies: staticData.apoiaSession.cookies,\n      cookieString: staticData.apoiaSession.cookieString,\n      expiresAt: staticData.apoiaSession.timestamp + maxAge,\n      fromCache: true\n    };\n  }\n}\n\nconsole.log('🔄 Iniciando SSO com Apoia usando token PDPJ');\nreturn {\n  hasValidSession: false,\n  pdpjToken: pdpjToken,\n  tokenType: staticData.pdpj_auth?.token_type || 'Bearer'\n};"
+      },
+      "id": "bdc92118-f74b-458f-b7a0-2c395588461d",
+      "name": "Check Session & Token",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        200,
+        280
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.hasValidSession }}",
+              "value2": "={{ true }}"
+            }
+          ]
+        }
+      },
+      "id": "aeaf901e-4ca3-467d-a457-500f6b1ceaaf",
+      "name": "Has Valid Session?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        400,
+        280
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "https://apoia.pdpj.jus.br/api/auth/session",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $json.tokenType }} {{ $json.pdpjToken }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Referer",
+              "value": "https://apoia.pdpj.jus.br/"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "3b240001-febc-423e-ba99-9fbb27415c3f",
+      "name": "Apoia SSO Session",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        600,
+        380
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Processar resposta do SSO\nconst response = $input.first().json;\nconst statusCode = response.statusCode || 200;\nconst headers = response.headers || {};\nconst body = response.body || {};\n\nconsole.log('📡 Status SSO:', statusCode);\nconsole.log('📦 Response headers:', Object.keys(headers));\n\n// Se já está autenticado (200)\nif (statusCode === 200 && body.user) {\n  console.log('✅ Usuário já autenticado no Apoia:', body.user.email);\n  \n  // Extrair cookies se houver\n  const cookies = extractCookies(headers);\n  \n  if (cookies.sessionToken || cookies.all['__Secure-next-auth.session-token']) {\n    return {\n      success: true,\n      authenticated: true,\n      user: body.user,\n      cookies: cookies.all,\n      cookieString: cookies.string,\n      sessionToken: cookies.sessionToken || cookies.all['__Secure-next-auth.session-token']\n    };\n  }\n}\n\n// Se precisa fazer callback/signin\nconsole.log('⚠️ Necessário fazer signin no Apoia');\nreturn {\n  needsSignin: true,\n  pdpjToken: $node['Check Session & Token'].json.pdpjToken,\n  tokenType: $node['Check Session & Token'].json.tokenType || 'Bearer',\n  csrfToken: body.csrfToken || null\n};\n\n// Função auxiliar melhorada\nfunction extractCookies(headers) {\n  const cookies = {};\n  const all = {};\n  \n  if (headers['set-cookie']) {\n    const setCookies = Array.isArray(headers['set-cookie']) \n      ? headers['set-cookie'] \n      : [headers['set-cookie']];\n    \n    setCookies.forEach(cookie => {\n      const parts = cookie.split(';');\n      const [name, value] = parts[0].split('=');\n      if (name && value) {\n        const cleanName = name.trim();\n        const cleanValue = value.trim();\n        all[cleanName] = cleanValue;\n        \n        // Identificar session tokens\n        if (cleanName.includes('session-token') || \n            cleanName.includes('next-auth')) {\n          cookies.sessionToken = cleanValue;\n        }\n      }\n    });\n  }\n  \n  // Construir cookie string na ordem correta\n  const orderedCookies = [];\n  const priority = ['__Secure-next-auth.session-token', 'next-auth.session-token'];\n  \n  priority.forEach(key => {\n    if (all[key]) orderedCookies.push(`${key}=${all[key]}`);\n  });\n  \n  Object.entries(all).forEach(([k, v]) => {\n    if (!priority.includes(k)) {\n      orderedCookies.push(`${k}=${v}`);\n    }\n  });\n  \n  return {\n    all,\n    string: orderedCookies.join('; '),\n    sessionToken: cookies.sessionToken\n  };\n}"
+      },
+      "id": "6252040e-bffa-4f30-a90d-ec902d925fbe",
+      "name": "Process SSO Response",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        800,
+        380
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.needsSignin }}",
+              "value2": "={{ true }}"
+            }
+          ]
+        }
+      },
+      "id": "d1665a18-708d-4b4a-ba0f-2e15f6e38a60",
+      "name": "Needs Signin?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        1000,
+        380
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://apoia.pdpj.jus.br/api/auth/signin/pdpj",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $json.tokenType }} {{ $json.pdpjToken }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Referer",
+              "value": "https://apoia.pdpj.jus.br/auth/signin"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"callbackUrl\": \"https://apoia.pdpj.jus.br/\",\n  \"redirect\": true,\n  \"json\": true\n}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "0652a4c9-4814-45b4-88f4-fb703319c238",
+      "name": "Apoia Signin",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1200,
+        480
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Processar resposta do signin e extrair cookies finais\nconst response = $input.first().json;\nconst headers = response.headers || {};\nconst statusCode = response.statusCode || 200;\n\nconsole.log('Signin status:', statusCode);\n\n// Extrair todos os cookies\nconst cookies = {};\nif (headers['set-cookie']) {\n  const setCookies = Array.isArray(headers['set-cookie']) \n    ? headers['set-cookie'] \n    : [headers['set-cookie']];\n  \n  setCookies.forEach(cookie => {\n    const parts = cookie.split(';');\n    const [name, value] = parts[0].split('=');\n    if (name && value) {\n      cookies[name.trim()] = value.trim();\n    }\n  });\n}\n\n// Procurar session token\nconst sessionToken = cookies['__Secure-next-auth.session-token'] || \n                    cookies['next-auth.session-token'] ||\n                    cookies['__Host-next-auth.session-token'];\n\nif (!sessionToken) {\n  console.error('Cookies recebidos:', Object.keys(cookies));\n  throw new Error('Session token não encontrado após signin');\n}\n\nconsole.log('✅ Session token Apoia obtido com sucesso');\n\nconst cookieString = Object.entries(cookies)\n  .map(([k, v]) => `${k}=${v}`)\n  .join('; ');\n\nreturn {\n  success: true,\n  sessionToken,\n  cookies,\n  cookieString,\n  timestamp: Date.now(),\n  source: 'signin'\n};"
+      },
+      "id": "b894ccd3-221f-4b09-8718-15fb2a6f9417",
+      "name": "Extract Final Cookies",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1400,
+        480
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Salvar sessão Apoia no staticData\nconst sessionData = $input.first().json;\nconst staticData = $getWorkflowStaticData('global');\n\n// Estruturar dados da sessão\nstaticData.apoiaSession = {\n  sessionToken: sessionData.sessionToken,\n  cookies: sessionData.cookies,\n  cookieString: sessionData.cookieString,\n  timestamp: sessionData.timestamp || Date.now(),\n  expiresAt: (sessionData.timestamp || Date.now()) + (23 * 60 * 60 * 1000), // 23 horas\n  source: sessionData.source || 'sso',\n  user: sessionData.user || null\n};\n\nconsole.log('💾 Sessão Apoia salva com sucesso');\nconsole.log(`⏰ Expira em: ${new Date(staticData.apoiaSession.expiresAt).toLocaleString('pt-BR')}`);\nconsole.log(`📍 Origem: ${staticData.apoiaSession.source}`);\n\nreturn {\n  success: true,\n  message: 'Sessão Apoia estabelecida com sucesso via SSO PDPJ',\n  sessionToken: sessionData.sessionToken,\n  cookieString: sessionData.cookieString,\n  expiresAt: staticData.apoiaSession.expiresAt,\n  expiresAtFormatted: new Date(staticData.apoiaSession.expiresAt).toLocaleString('pt-BR'),\n  source: staticData.apoiaSession.source\n};"
+      },
+      "id": "18a44ff6-178f-415e-a393-cd92a3750cb0",
+      "name": "Save Apoia Session",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1600,
+        280
+      ],
+      "typeVersion": 2
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Check Session & Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Session & Token": {
+      "main": [
+        [
+          {
+            "node": "Has Valid Session?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Valid Session?": {
+      "main": [
+        [
+          {
+            "node": "Save Apoia Session",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Apoia SSO Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apoia SSO Session": {
+      "main": [
+        [
+          {
+            "node": "Process SSO Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process SSO Response": {
+      "main": [
+        [
+          {
+            "node": "Needs Signin?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Signin?": {
+      "main": [
+        [
+          {
+            "node": "Save Apoia Session",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Apoia Signin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apoia Signin": {
+      "main": [
+        [
+          {
+            "node": "Extract Final Cookies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Final Cookies": {
+      "main": [
+        [
+          {
+            "node": "Save Apoia Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "906f97d3-8dce-49b3-812c-d3c926c6a1da",
+  "meta": {
+    "instanceId": "9601c2da077393e3c7d395982728b7744de7ac7dd087f4789f3781b83e316e6e"
+  },
+  "id": "GxZAjjfpsqit1RXM",
+  "tags": [
+    {
+      "createdAt": "2025-06-06T17:41:49.479Z",
+      "updatedAt": "2025-06-06T17:41:49.479Z",
+      "id": "bbYE4vVexO2gKvZd",
+      "name": "PDPJ"
+    },
+    {
+      "createdAt": "2025-06-10T09:17:14.395Z",
+      "updatedAt": "2025-06-10T09:17:14.395Z",
+      "id": "0yMpRlAuYXuxPgfh",
+      "name": "Apoia"
+    }
+  ]
+}

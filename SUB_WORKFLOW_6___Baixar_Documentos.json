@@ -1,0 +1,376 @@
+{
+  "name": "SUB-WORKFLOW 6 - Baixar Documentos",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "numeroProcesso"
+            },
+            {
+              "name": "tipo"
+            },
+            {
+              "name": "documentIds"
+            }
+          ]
+        }
+      },
+      "id": "d4fd5483-5707-47e8-9a33-84a2a7df1796",
+      "name": "Input Parameters",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        -400,
+        80
+      ],
+      "typeVersion": 1.1
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.tipo }}",
+              "operation": "equals",
+              "value2": "integral"
+            }
+          ]
+        }
+      },
+      "id": "fb11748d-abfe-4bea-8249-73e798bbef7c",
+      "name": "Check Download Type",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        -200,
+        80
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Preparar download integral\nconst numeroProcesso = $json.numeroProcesso.replace(/[^0-9]/g, '');\n\n// Buscar token\nconst staticData = $getWorkflowStaticData('global');\nconst auth = staticData.pdpj_auth;\n\nif (!auth || !auth.access_token) {\n    throw new Error('Token não encontrado. Execute autenticação primeiro.');\n}\n\nreturn {\n    numeroLimpo: numeroProcesso,\n    token: auth.access_token,\n    tokenType: auth.token_type,\n    tipo: 'integral'\n};"
+      },
+      "id": "95325f33-5f22-486b-8180-7c3aae52d6e8",
+      "name": "Prepare Integral Download",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "url": "=https://portaldeservicos.pdpj.jus.br/api/v2/processos/{{ $json.numeroLimpo }}/download/integral",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $json.tokenType }} {{ $json.token }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "60627acd-5890-41af-b1dd-2d6af15e9002",
+      "name": "Download Integral PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        200,
+        0
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $node['Input Parameters'].json.tipo }}",
+              "operation": "equals",
+              "value2": "principais"
+            }
+          ]
+        }
+      },
+      "id": "5b862f99-e1bb-41f7-88a0-27272f43426c",
+      "name": "Is Principais?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        0,
+        160
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "workflowId": "={{ $execution.workflowId }}",
+        "options": {}
+      },
+      "id": "78f1b735-9dda-4ded-bfdf-1b880109e84d",
+      "name": "List Documents First",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "position": [
+        200,
+        160
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filtrar documentos principais\nconst documentos = $json.documentosPrincipais || [];\nconst numeroProcesso = $node['Input Parameters'].json.numeroProcesso;\n\nif (documentos.length === 0) {\n    throw new Error('Nenhum documento principal encontrado');\n}\n\n// Preparar lista de IDs para download\nconst idsParaDownload = documentos.map(doc => doc.id).filter(id => id);\n\nconsole.log(`📄 Preparando download de ${idsParaDownload.length} documentos principais`);\n\nreturn {\n    numeroProcesso: numeroProcesso,\n    documentIds: idsParaDownload,\n    documentos: documentos,\n    tipo: 'principais'\n};"
+      },
+      "id": "b4d15f86-a76a-4199-8953-4b64cd15fe4e",
+      "name": "Filter Principal Docs",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        400,
+        160
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Processar documentos específicos\nconst documentIds = $node['Input Parameters'].json.documentIds;\nconst numeroProcesso = $node['Input Parameters'].json.numeroProcesso;\n\nif (!documentIds || documentIds.trim() === '') {\n    throw new Error('IDs de documentos não fornecidos');\n}\n\n// Separar IDs\nconst ids = documentIds.split(',').map(id => id.trim()).filter(id => id);\n\nif (ids.length === 0) {\n    throw new Error('Nenhum ID válido fornecido');\n}\n\nconsole.log(`📄 Preparando download de ${ids.length} documentos específicos`);\n\nreturn {\n    numeroProcesso: numeroProcesso,\n    documentIds: ids,\n    tipo: 'especificos'\n};"
+      },
+      "id": "7864aa38-29d5-4dfe-9e80-ee1b26a81079",
+      "name": "Prepare Specific IDs",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        200,
+        240
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "60cf57d8-68ec-454d-9ad8-e389321e66b1",
+      "name": "Split Documents",
+      "type": "n8n-nodes-base.splitInBatches",
+      "position": [
+        600,
+        160
+      ],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "jsCode": "// Preparar download individual\nconst docId = Array.isArray($json) ? $json[0] : $json;\nconst numeroProcesso = $node['Input Parameters'].json.numeroProcesso.replace(/[^0-9]/g, '');\n\n// Buscar token\nconst staticData = $getWorkflowStaticData('global');\nconst auth = staticData.pdpj_auth;\n\nreturn {\n    numeroLimpo: numeroProcesso,\n    documentId: docId,\n    token: auth.access_token,\n    tokenType: auth.token_type\n};"
+      },
+      "id": "7b85f28e-9476-4b5f-bb6e-7abe07d3c491",
+      "name": "Prepare Individual Download",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        800,
+        160
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "url": "=https://portaldeservicos.pdpj.jus.br/api/v2/processos/{{ $json.numeroLimpo }}/documentos/{{ $json.documentId }}/download",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $json.tokenType }} {{ $json.token }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          },
+          "timeout": 45000
+        }
+      },
+      "id": "62fe79cc-d4a9-48f8-bdb4-01ac6952f767",
+      "name": "Download Document",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1000,
+        160
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Consolidar downloads\nconst tipo = $node['Input Parameters'].json.tipo;\nconst numeroProcesso = $node['Input Parameters'].json.numeroProcesso;\n\n// Para download integral\nif (tipo === 'integral') {\n    const file = $input.first().binary;\n    return {\n        sucesso: true,\n        tipo: 'integral',\n        numeroProcesso: numeroProcesso,\n        arquivo: {\n            nome: `processo_${numeroProcesso}_integral.pdf`,\n            tamanho: file?.data?.length || 0,\n            formato: 'PDF',\n            disponivel: true\n        },\n        mensagem: 'Download integral realizado com sucesso'\n    };\n}\n\n// Para downloads múltiplos\nconst arquivos = $input.all().map((item, index) => {\n    const binary = item.binary;\n    return {\n        nome: `documento_${index + 1}.pdf`,\n        tamanho: binary?.data?.length || 0,\n        disponivel: true\n    };\n});\n\nreturn {\n    sucesso: true,\n    tipo: tipo,\n    numeroProcesso: numeroProcesso,\n    arquivos: arquivos,\n    totalArquivos: arquivos.length,\n    mensagem: `Download de ${arquivos.length} documentos realizado com sucesso`\n};"
+      },
+      "id": "73fc5e71-d21c-4d41-80e6-83bdad85ae06",
+      "name": "Consolidate Downloads",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1200,
+        80
+      ],
+      "typeVersion": 2
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Input Parameters": {
+      "main": [
+        [
+          {
+            "node": "Check Download Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Download Type": {
+      "main": [
+        [
+          {
+            "node": "Prepare Integral Download",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Principais?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Integral Download": {
+      "main": [
+        [
+          {
+            "node": "Download Integral PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Integral PDF": {
+      "main": [
+        [
+          {
+            "node": "Consolidate Downloads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Principais?": {
+      "main": [
+        [
+          {
+            "node": "List Documents First",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Specific IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Documents First": {
+      "main": [
+        [
+          {
+            "node": "Filter Principal Docs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Principal Docs": {
+      "main": [
+        [
+          {
+            "node": "Split Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Specific IDs": {
+      "main": [
+        [
+          {
+            "node": "Split Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Documents": {
+      "main": [
+        [
+          {
+            "node": "Prepare Individual Download",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Individual Download": {
+      "main": [
+        [
+          {
+            "node": "Download Document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Document": {
+      "main": [
+        [
+          {
+            "node": "Consolidate Downloads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "0bdd54ae-f597-4909-88f1-ced67a87cc09",
+  "meta": {
+    "instanceId": "9601c2da077393e3c7d395982728b7744de7ac7dd087f4789f3781b83e316e6e"
+  },
+  "id": "IWmDBcIUWI4fH7Ue",
+  "tags": []
+}

@@ -1,0 +1,227 @@
+{
+  "name": "SUB-WORKFLOW 4 - Gerar Relatório com IA",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "numeroProcesso"
+            },
+            {
+              "name": "tipoRelatorio"
+            }
+          ]
+        }
+      },
+      "id": "f4f671ae-438c-4a3b-957f-a5408f819c82",
+      "name": "Input Parameters",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1.1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Preparar prompt baseado no tipo de relatório\nconst processo = $json;\nconst tipoRelatorio = $node['Input Parameters'].json.tipoRelatorio || 'completo';\n\n// Templates de prompt por tipo\nconst prompts = {\n    completo: `Analise detalhadamente o processo judicial abaixo e gere um relatório completo considerando:\n\n1. SUMÁRIO EXECUTIVO\n2. ANÁLISE DO MÉRITO\n3. RISCOS E OPORTUNIDADES\n4. PRECEDENTES RELEVANTES\n5. ESTRATÉGIA RECOMENDADA\n6. ESTIMATIVA DE VALORES\n7. PRÓXIMOS PASSOS\n\nDados do Processo:\n${JSON.stringify(processo, null, 2)}\n\nConsidere especialmente os interesses da Midea Carrier como ré em processo consumerista.`,\n\n    executivo: `Gere um resumo executivo conciso (máximo 1 página) do processo abaixo, destacando:\n- Objeto da demanda\n- Principais riscos\n- Valor envolvido\n- Recomendação estratégica\n\nDados: ${JSON.stringify(processo, null, 2)}`,\n\n    riscos: `Realize uma análise detalhada de riscos do processo, considerando:\n- Probabilidade de perda (remota/possível/provável)\n- Fundamentos jurídicos do autor\n- Precedentes desfavoráveis\n- Pontos fracos da defesa\n- Estimativa de condenação\n- Riscos reputacionais\n\nDados: ${JSON.stringify(processo, null, 2)}`,\n\n    estrategico: `Desenvolva uma estratégia processual completa, incluindo:\n- Teses de defesa aplicáveis\n- Possibilidade de acordo\n- Recursos cabíveis\n- Produção de provas necessárias\n- Timeline recomendada\n\nDados: ${JSON.stringify(processo, null, 2)}`\n};\n\n// Adicionar contexto específico Midea\nlet contextMidea = '\\n\\nCONTEXTO MIDEA CARRIER:\\n';\n\nif (processo.produtosIdentificados && processo.produtosIdentificados.length > 0) {\n    contextMidea += `Produtos envolvidos: ${processo.produtosIdentificados.join(', ')}\\n`;\n}\n\nif (processo.envolveMideaCarrier) {\n    contextMidea += 'A Midea Carrier figura como parte no processo.\\n';\n    contextMidea += 'Considere políticas de acordo para defeitos comprovados em produtos.\\n';\n    contextMidea += 'Verifique possibilidade de denunciação à lide de fornecedores/fabricantes.\\n';\n}\n\nconst promptFinal = prompts[tipoRelatorio] + contextMidea;\n\nreturn {\n    processo: processo,\n    tipoRelatorio: tipoRelatorio,\n    prompt: promptFinal\n};"
+      },
+      "id": "a1d3fa4d-705b-485b-b8a8-8b1437628a08",
+      "name": "Prepare AI Prompt",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        400,
+        0
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "model": "gpt-4.1-mini",
+        "options": {
+          "maxTokens": 3000,
+          "temperature": 0.3
+        }
+      },
+      "id": "99c37dbb-57e3-4828-b90c-36b37b65db22",
+      "name": "GPT-4 Analysis",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "position": [
+        520,
+        200
+      ],
+      "typeVersion": 1,
+      "credentials": {
+        "openAiApi": {
+          "id": "VQ3UGBDEJ54kzti3",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Formatar relatório final\nconst analiseIA = $json.text || $json.content || $json.message?.content || 'Erro ao gerar análise';\nconst processo = $node['Prepare AI Prompt'].json.processo;\nconst tipoRelatorio = $node['Prepare AI Prompt'].json.tipoRelatorio;\n\n// Gerar cabeçalho do relatório\nconst dataRelatorio = new Date().toLocaleString('pt-BR');\nconst cabecalho = `\n# RELATÓRIO JURÍDICO - ${tipoRelatorio.toUpperCase()}\n\n**Processo**: ${processo.numeroFormatado}\n**Data do Relatório**: ${dataRelatorio}\n**Fonte dos Dados**: ${processo.fonte}\n\n---\n\n## DADOS DO PROCESSO\n\n- **Classe**: ${processo.classe}\n- **Assunto**: ${processo.assunto}\n- **Valor da Causa**: ${processo.valorCausaFormatado}\n- **Distribuição**: ${new Date(processo.dataDistribuicao).toLocaleDateString('pt-BR')}\n- **Órgão Julgador**: ${processo.orgaoJulgador}\n- **Tribunal**: ${processo.tribunal}\n\n### PARTES\n**Polo Ativo**: ${processo.partes.poloAtivo.map(p => p.nome).join(', ')}\n**Polo Passivo**: ${processo.partes.poloPassivo.map(p => p.nome).join(', ')}\n\n---\n\n## ANÁLISE JURÍDICA\n\n${analiseIA}\n\n---\n\n## INFORMAÇÕES ADICIONAIS\n\n- **Total de Movimentações**: ${processo.totalMovimentacoes}\n- **Última Movimentação**: ${processo.dataUltimaMovimentacao ? new Date(processo.dataUltimaMovimentacao).toLocaleDateString('pt-BR') : 'N/A'}\n- **Envolve Midea Carrier**: ${processo.envolveMideaCarrier ? 'SIM' : 'NÃO'}\n${processo.produtosIdentificados?.length > 0 ? `- **Produtos Identificados**: ${processo.produtosIdentificados.join(', ')}` : ''}\n\n---\n\n*Este relatório foi gerado automaticamente pelo Sistema Jurídico PDPJ - Midea Carrier*\n`;\n\n// Salvar relatório no cache para recuperação futura\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.relatorios) staticData.relatorios = {};\n\nconst relatorioId = `${processo.numeroProcesso}_${tipoRelatorio}_${Date.now()}`;\nstaticData.relatorios[relatorioId] = {\n    conteudo: cabecalho,\n    timestamp: Date.now(),\n    numeroProcesso: processo.numeroProcesso,\n    tipo: tipoRelatorio\n};\n\nreturn {\n    sucesso: true,\n    relatorioId: relatorioId,\n    numeroProcesso: processo.numeroFormatado,\n    tipoRelatorio: tipoRelatorio,\n    conteudo: cabecalho,\n    conteudoMarkdown: cabecalho,\n    conteudoHtml: null, // Pode ser implementado se necessário\n    metadados: {\n        dataGeracao: dataRelatorio,\n        fontesDados: processo.fonte,\n        envolveMidea: processo.envolveMideaCarrier,\n        produtos: processo.produtosIdentificados || []\n    }\n};"
+      },
+      "id": "e19e2b35-e64a-437a-ae00-80bf91aa2e2b",
+      "name": "Format Final Report",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        880,
+        -40
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainRetrievalQa",
+      "typeVersion": 1.6,
+      "position": [
+        540,
+        -20
+      ],
+      "id": "ea48ba15-c927-425e-a6e6-66cefd823b38",
+      "name": "Question and Answer Chain"
+    },
+    {
+      "parameters": {
+        "workflowId": "cPY5qorF5THA9PFk",
+        "options": {}
+      },
+      "id": "edd86d66-4638-430a-8a2f-8d9abd207b2b",
+      "name": "Get Process Data2",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "position": [
+        20,
+        180
+      ],
+      "typeVersion": 1,
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "cPY5qorF5THA9PFk",
+          "mode": "list",
+          "cachedResultName": "SUB-WORKFLOW 2 - Consultar Processo"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "numeroProcesso",
+              "displayName": "numeroProcesso",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "fonte",
+              "displayName": "fonte",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        200,
+        20
+      ],
+      "id": "1cd767aa-1ef1-4ab2-883b-994eff2c7773",
+      "name": "Get Process Data"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Input Parameters": {
+      "main": [
+        [
+          {
+            "node": "Get Process Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT-4 Analysis": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Question and Answer Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare AI Prompt": {
+      "main": [
+        [
+          {
+            "node": "Question and Answer Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Question and Answer Chain": {
+      "main": [
+        [
+          {
+            "node": "Format Final Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Process Data2": {
+      "main": [
+        []
+      ]
+    },
+    "Get Process Data": {
+      "main": [
+        [
+          {
+            "node": "Prepare AI Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "dc9d5877-27c9-432d-b7b8-ccaec6059a0f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "9601c2da077393e3c7d395982728b7744de7ac7dd087f4789f3781b83e316e6e"
+  },
+  "id": "5zxE5O3v1WgHYfKy",
+  "tags": []
+}

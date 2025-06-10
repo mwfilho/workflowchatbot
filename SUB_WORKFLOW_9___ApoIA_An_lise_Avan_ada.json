@@ -1,0 +1,273 @@
+{
+  "name": "SUB-WORKFLOW 9 - ApoIA Análise Avançada",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "numeroProcesso"
+            },
+            {
+              "name": "tipoAnalise"
+            }
+          ]
+        }
+      },
+      "id": "71b05543-420e-481e-b9c0-ccb37ab81ef3",
+      "name": "Input ApoIA",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        80,
+        -180
+      ],
+      "typeVersion": 1.1
+    },
+    {
+      "parameters": {
+        "workflowId": "={{ $execution.workflowId }}",
+        "options": {}
+      },
+      "id": "54531f54-9865-4412-a3d9-5a97234454db",
+      "name": "Get Process Data ApoIA",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "position": [
+        280,
+        -180
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Preparar análise ApoIA\nconst processo = $json;\nconst tipoAnalise = $node['Input ApoIA'].json.tipoAnalise || 'completa';\nconst numeroLimpo = processo.numeroProcesso.replace(/[^0-9]/g, '');\n\n// Buscar token\nconst staticData = $getWorkflowStaticData('global');\nconst auth = staticData.pdpj_auth;\n\nif (!auth || !auth.access_token) {\n    throw new Error('Token não encontrado. Execute autenticação primeiro.');\n}\n\n// Configurar prompts específicos do ApoIA\nconst promptsApoia = {\n    completa: {\n        endpoint: '/analise/completa',\n        parametros: {\n            incluirRiscos: true,\n            incluirEstrategia: true,\n            incluirPrevisao: true,\n            incluirProvas: true,\n            contextoEmpresarial: 'Midea Carrier - Fabricante de ar condicionado e eletrodomésticos'\n        }\n    },\n    resumo: {\n        endpoint: '/analise/resumo-executivo',\n        parametros: {\n            formatoExecutivo: true,\n            maxPaginas: 2,\n            focoGerencial: true\n        }\n    },\n    riscos: {\n        endpoint: '/analise/riscos',\n        parametros: {\n            detalharRiscos: true,\n            calcularProbabilidade: true,\n            estimarValores: true,\n            cenariosPossiveis: true\n        }\n    },\n    estrategia: {\n        endpoint: '/analise/estrategia',\n        parametros: {\n            incluirTesesDefesa: true,\n            analisarPrecedentes: true,\n            sugerirAcordo: true,\n            timeline: true\n        }\n    },\n    previsao: {\n        endpoint: '/analise/previsao',\n        parametros: {\n            algoritmoML: true,\n            basePrecedentes: true,\n            confiancaMinima: 0.7\n        }\n    },\n    provas: {\n        endpoint: '/analise/provas',\n        parametros: {\n            analisarDocumentos: true,\n            identificarLacunas: true,\n            sugerirPericias: true,\n            avaliarTestemunhas: true\n        }\n    }\n};\n\nconst config = promptsApoia[tipoAnalise];\n\n// Adicionar contexto específico do processo\nif (processo.envolveMideaCarrier) {\n    config.parametros.contextoAdicional = {\n        empresa: 'Midea Carrier',\n        produtosEnvolvidos: processo.produtosIdentificados || [],\n        defeitoComum: identificarDefeitoComum(processo),\n        politicaAcordo: 'Favorável em casos de defeito comprovado'\n    };\n}\n\nconsole.log(`🤖 Executando análise ApoIA: ${tipoAnalise}`);\n\nreturn {\n    numeroProcesso: processo.numeroProcesso,\n    numeroLimpo: numeroLimpo,\n    tipoAnalise: tipoAnalise,\n    endpoint: config.endpoint,\n    parametros: config.parametros,\n    processo: processo,\n    token: auth.access_token,\n    tokenType: auth.token_type\n};\n\n// Função auxiliar\nfunction identificarDefeitoComum(processo) {\n    const textoCompleto = JSON.stringify(processo).toLowerCase();\n    const defeitos = [\n        { keywords: ['vazamento', 'vaza'], tipo: 'Vazamento de gás/água' },\n        { keywords: ['não gela', 'não refrigera', 'não esfria'], tipo: 'Falha na refrigeração' },\n        { keywords: ['ruído', 'barulho'], tipo: 'Ruído excessivo' },\n        { keywords: ['painel', 'display', 'eletrônico'], tipo: 'Defeito eletrônico' },\n        { keywords: ['compressor'], tipo: 'Problema no compressor' }\n    ];\n    \n    for (const defeito of defeitos) {\n        if (defeito.keywords.some(kw => textoCompleto.includes(kw))) {\n            return defeito.tipo;\n        }\n    }\n    \n    return 'Defeito não especificado';\n}"
+      },
+      "id": "159222d2-2ded-48b6-9707-c9f58ba11e89",
+      "name": "Prepare ApoIA Analysis",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        480,
+        -180
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.apoia.pdpj.jus.br/v1/processos/{{ $json.numeroLimpo }}{{ $json.endpoint }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $json.tokenType }} {{ $json.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-AI-Model",
+              "value": "gpt-4-turbo"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.parametros) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "15a9a76e-2f19-4f80-9d3b-3b2bba370bdd",
+      "name": "ApoIA AI Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        680,
+        -180
+      ],
+      "typeVersion": 4.2,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.statusCode || 200 }}",
+              "operation": "equal",
+              "value2": 200
+            }
+          ]
+        }
+      },
+      "id": "1a3da684-c7ab-45c6-b2b7-a0affd5c0a5d",
+      "name": "ApoIA Success?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        880,
+        -180
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fallback para análise local com GPT-4\nconst dados = $node['Prepare ApoIA Analysis'].json;\nconst processo = dados.processo;\nconst tipoAnalise = dados.tipoAnalise;\n\n// Prompts específicos por tipo de análise\nconst prompts = {\n    completa: `Realize uma análise jurídica completa do processo abaixo, incluindo:\n\n1. RESUMO EXECUTIVO (1 página)\n2. ANÁLISE DE MÉRITO\n   - Fundamentos do pedido\n   - Viabilidade das teses\n   - Pontos fortes e fracos\n3. ANÁLISE DE RISCOS\n   - Probabilidade de perda\n   - Valores estimados\n   - Riscos reputacionais\n4. PRECEDENTES RELEVANTES\n5. ESTRATÉGIA PROCESSUAL\n   - Teses de defesa\n   - Produção de provas\n   - Possibilidade de acordo\n6. TIMELINE E PRÓXIMOS PASSOS\n\nProcesso: ${JSON.stringify(processo, null, 2)}`,\n\n    riscos: `Analise os riscos processuais do caso abaixo:\n\n1. CLASSIFICAÇÃO DO RISCO\n   - Remoto / Possível / Provável\n   - Justificativa detalhada\n2. ESTIMATIVA FINANCEIRA\n   - Danos materiais\n   - Danos morais\n   - Custas e honorários\n3. FATORES AGRAVANTES\n4. FATORES ATENUANTES\n5. CENÁRIOS POSSÍVEIS\n   - Melhor cenário\n   - Cenário provável\n   - Pior cenário\n6. RECOMENDAÇÕES DE MITIGAÇÃO\n\nProcesso: ${JSON.stringify(processo, null, 2)}`,\n\n    estrategia: `Desenvolva uma estratégia processual completa:\n\n1. ANÁLISE DA PETIÇÃO INICIAL\n   - Pontos vulneráveis\n   - Contradições\n2. TESES DE DEFESA APLICÁVEIS\n   - Preliminares\n   - Mérito\n3. PROVAS NECESSÁRIAS\n   - Documentais\n   - Periciais\n   - Testemunhais\n4. POSSIBILIDADE DE ACORDO\n   - Vantagens\n   - Parâmetros recomendados\n5. RECURSOS CABÍVEIS\n6. CRONOGRAMA ESTRATÉGICO\n\nProcesso: ${JSON.stringify(processo, null, 2)}`,\n\n    previsao: `Com base em análise preditiva, forneça:\n\n1. PROBABILIDADE DE ÊXITO\n   - Percentual estimado\n   - Fatores considerados\n2. TEMPO ESTIMADO\n   - Até sentença\n   - Até trânsito em julgado\n3. VALORES PROVÁVEIS\n   - Condenação esperada\n   - Acordo recomendado\n4. PRECEDENTES SIMILARES\n   - Casos análogos\n   - Resultados obtidos\n5. RECOMENDAÇÃO FINAL\n\nProcesso: ${JSON.stringify(processo, null, 2)}`,\n\n    resumo: `Elabore um resumo executivo (máximo 2 páginas) contendo:\n\n1. SÍNTESE DO CASO (1 parágrafo)\n2. PARTES E PEDIDOS\n3. VALOR E RISCO\n4. STATUS ATUAL\n5. PRÓXIMAS AÇÕES\n6. RECOMENDAÇÃO GERENCIAL\n\nProcesso: ${JSON.stringify(processo, null, 2)}`,\n\n    provas: `Analise as provas do processo:\n\n1. PROVAS EXISTENTES\n   - Documentais\n   - Avaliação da força probatória\n2. PROVAS NECESSÁRIAS\n   - O que falta\n   - Como obter\n3. SUGESTÃO DE PERÍCIAS\n   - Técnica\n   - Quesitos sugeridos\n4. TESTEMUNHAS\n   - Relevantes\n   - Preparação necessária\n5. ESTRATÉGIA PROBATÓRIA\n\nProcesso: ${JSON.stringify(processo, null, 2)}`\n};\n\nconst promptSelecionado = prompts[tipoAnalise] || prompts.completa;\n\n// Adicionar contexto Midea\nconst contextoMidea = `\\n\\nCONTEXTO IMPORTANTE:\\n- A Midea Carrier é ré no processo\\n- Produtos envolvidos: ${processo.produtosIdentificados?.join(', ') || 'Não especificados'}\\n- Considere políticas de acordo para defeitos comprovados\\n- Atente para precedentes em casos similares de produtos`;\n\nreturn {\n    processo: processo,\n    tipoAnalise: tipoAnalise,\n    prompt: promptSelecionado + contextoMidea,\n    usarGPT: true\n};"
+      },
+      "id": "5ad83942-4292-408f-8b4b-9a0341a6a25b",
+      "name": "Prepare GPT Fallback",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1080,
+        -100
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "model": "gpt-4-turbo-preview",
+        "options": {
+          "maxTokens": 4000,
+          "temperature": 0.3
+        }
+      },
+      "id": "013dbcac-c953-4589-ace5-42933d0f1b0f",
+      "name": "GPT-4 Fallback Analysis",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "position": [
+        1200,
+        240
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Processar e formatar resultado da análise\nconst apoiaResponse = $node['ApoIA AI Analysis']?.json;\nconst gptResponse = $node['GPT-4 Fallback Analysis']?.json;\nconst dadosOriginais = $node['Prepare ApoIA Analysis'].json;\n\nlet analise = null;\nlet fonte = 'unknown';\n\n// Verificar qual análise usar\nif (apoiaResponse && !apoiaResponse.error) {\n    analise = apoiaResponse;\n    fonte = 'ApoIA';\n} else if (gptResponse) {\n    analise = {\n        conteudo: gptResponse.text || gptResponse.content || gptResponse.message?.content,\n        tipo: dadosOriginais.tipoAnalise,\n        geradoPor: 'GPT-4 (Fallback)'\n    };\n    fonte = 'GPT-4';\n} else {\n    throw new Error('Nenhuma análise foi gerada');\n}\n\n// Estruturar resultado final\nconst resultado = {\n    sucesso: true,\n    numeroProcesso: dadosOriginais.numeroProcesso,\n    tipoAnalise: dadosOriginais.tipoAnalise,\n    fonte: fonte,\n    dataAnalise: new Date().toISOString(),\n    analise: fonte === 'ApoIA' ? estruturarAnaliseApoia(analise) : estruturarAnaliseGPT(analise),\n    metadados: {\n        tempoProcessamento: Date.now() - $execution.resumeTime,\n        versaoModelo: fonte === 'ApoIA' ? 'ApoIA v2' : 'GPT-4 Turbo',\n        processoEnvolveMidea: dadosOriginais.processo.envolveMideaCarrier,\n        produtosIdentificados: dadosOriginais.processo.produtosIdentificados || []\n    }\n};\n\n// Salvar no cache para consultas futuras\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.analises) staticData.analises = {};\n\nconst cacheKey = `${dadosOriginais.numeroLimpo}_${dadosOriginais.tipoAnalise}_${Date.now()}`;\nstaticData.analises[cacheKey] = {\n    resultado: resultado,\n    timestamp: Date.now()\n};\n\n// Funções auxiliares\nfunction estruturarAnaliseApoia(analise) {\n    // ApoIA retorna estrutura específica\n    return {\n        resumo: analise.resumoExecutivo || analise.resumo || '',\n        riscos: {\n            classificacao: analise.classificacaoRisco || analise.nivelRisco || 'Não classificado',\n            probabilidade: analise.probabilidadePerda || null,\n            valorEstimado: analise.valorEstimadoCondenacao || null,\n            detalhamento: analise.analiseRiscos || analise.riscos || ''\n        },\n        estrategia: {\n            tesesDefesa: analise.tesesDefesa || [],\n            sugestaoAcordo: analise.sugestaoAcordo || null,\n            proximosPassos: analise.proximosPassos || [],\n            detalhamento: analise.estrategiaProcessual || ''\n        },\n        precedentes: analise.precedentesRelevantes || [],\n        previsao: {\n            tempoEstimado: analise.tempoEstimadoResolucao || null,\n            probabilidadeExito: analise.probabilidadeExito || null,\n            cenarios: analise.cenariosPossiveis || []\n        },\n        conclusao: analise.conclusao || analise.recomendacaoFinal || ''\n    };\n}\n\nfunction estruturarAnaliseGPT(analise) {\n    // GPT retorna texto livre, precisamos estruturar\n    const conteudo = analise.conteudo || '';\n    \n    return {\n        conteudoCompleto: conteudo,\n        resumo: extrairSecao(conteudo, 'RESUMO EXECUTIVO', 'SÍNTESE'),\n        riscos: {\n            detalhamento: extrairSecao(conteudo, 'ANÁLISE DE RISCOS', 'RISCOS')\n        },\n        estrategia: {\n            detalhamento: extrairSecao(conteudo, 'ESTRATÉGIA', 'TESES DE DEFESA')\n        },\n        precedentes: extrairSecao(conteudo, 'PRECEDENTES', 'JURISPRUDÊNCIA'),\n        conclusao: extrairSecao(conteudo, 'CONCLUSÃO', 'RECOMENDAÇÃO')\n    };\n}\n\nfunction extrairSecao(texto, ...marcadores) {\n    for (const marcador of marcadores) {\n        const regex = new RegExp(`${marcador}[:\\s]*([\\s\\S]*?)(?=\\n\\d+\\.|\\n[A-Z]{3,}|$)`, 'i');\n        const match = texto.match(regex);\n        if (match) return match[1].trim();\n    }\n    return '';\n}\n\nreturn resultado;"
+      },
+      "id": "a499e8f6-ff99-4a7b-a232-fa8adafc8c13",
+      "name": "Format Analysis Result",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1480,
+        -180
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainRetrievalQa",
+      "typeVersion": 1.6,
+      "position": [
+        1240,
+        0
+      ],
+      "id": "a61419f4-ac6b-43c5-abbc-25f15d5a243e",
+      "name": "Question and Answer Chain"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Input ApoIA": {
+      "main": [
+        [
+          {
+            "node": "Get Process Data ApoIA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Process Data ApoIA": {
+      "main": [
+        [
+          {
+            "node": "Prepare ApoIA Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare ApoIA Analysis": {
+      "main": [
+        [
+          {
+            "node": "ApoIA AI Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ApoIA AI Analysis": {
+      "main": [
+        [
+          {
+            "node": "ApoIA Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ApoIA Success?": {
+      "main": [
+        [
+          {
+            "node": "Format Analysis Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare GPT Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT-4 Fallback Analysis": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Question and Answer Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare GPT Fallback": {
+      "main": [
+        [
+          {
+            "node": "Question and Answer Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "21e57b25-3738-4b9d-8cfe-77e678946bd2",
+  "meta": {
+    "instanceId": "9601c2da077393e3c7d395982728b7744de7ac7dd087f4789f3781b83e316e6e"
+  },
+  "id": "4BqJ4ca9j1ZbS3nF",
+  "tags": []
+}
