@@ -1,0 +1,29 @@
+name: Import n8n Documentation
+
+on:
+  workflow_dispatch:  # Permite executar manualmente o workflow
+
+jobs:
+  import-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Clone n8n-docs repository
+        run: |
+          git clone https://github.com/n8n-io/n8n-docs.git temp-n8n-docs
+
+      - name: Copy documentation files
+        run: |
+          # Copia todos os arquivos exceto .git
+          cp -r temp-n8n-docs/* ./
+          rm -rf temp-n8n-docs
+
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add .
+          git commit -m "Importa documentação completa do n8n-docs" || echo "No changes to commit"
+          git push
