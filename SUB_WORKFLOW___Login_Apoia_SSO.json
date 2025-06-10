@@ -26,7 +26,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Verificar sessão Apoia existente e token PDPJ\nconst staticData = $getWorkflowStaticData('global');\nconst forceNew = $input.first().json.forceNewLogin;\nlet pdpjToken = $input.first().json.pdpjToken;\n\n// Se não foi fornecido token, buscar do staticData\nif (!pdpjToken) {\n  if (staticData.pdpj_auth && staticData.pdpj_auth.access_token) {\n    const tokenAge = Date.now() - (staticData.pdpj_auth.timestamp || 0);\n    const tokenValid = tokenAge < (staticData.pdpj_auth.expires_in || 3600) * 1000;\n    \n    if (tokenValid) {\n      pdpjToken = staticData.pdpj_auth.access_token;\n      console.log('✅ Token PDPJ encontrado no staticData');\n    } else {\n      throw new Error('Token PDPJ expirado. Execute login PDPJ primeiro.');\n    }\n  } else {\n    throw new Error('Token PDPJ não encontrado. Execute login PDPJ primeiro.');\n  }\n}\n\n// Verificar sessão Apoia existente\nif (!forceNew && staticData.apoiaSession) {\n  const sessionAge = Date.now() - (staticData.apoiaSession.timestamp || 0);\n  const maxAge = 23 * 60 * 60 * 1000; // 23 horas\n  \n  if (sessionAge < maxAge && staticData.apoiaSession.cookies) {\n    console.log('✅ Sessão Apoia válida encontrada');\n    return {\n      hasValidSession: true,\n      cookies: staticData.apoiaSession.cookies,\n      cookieString: staticData.apoiaSession.cookieString,\n      expiresAt: staticData.apoiaSession.timestamp + maxAge,\n      fromCache: true\n    };\n  }\n}\n\nconsole.log('🔄 Iniciando SSO com Apoia usando token PDPJ');\nreturn {\n  hasValidSession: false,\n  pdpjToken: pdpjToken,\n  tokenType: staticData.pdpj_auth?.token_type || 'Bearer'\n};"
+        "jsCode": "\"// Verificar sess\\u00e3o Apoia existente e token PDPJ\\nconst staticData = $getWorkflowStaticData('global');\\nconst forceNew = $input.first().json.forceNewLogin;\\nlet pdpjToken = $input.first().json.pdpjToken;\\nconst dbSession = Array.isArray($input.first().json) ? $input.first().json[0] : null;\\n\\nif (!pdpjToken) {\\n  if (staticData.pdpj_auth && staticData.pdpj_auth.access_token) {\\n    const tokenAge = Date.now() - (staticData.pdpj_auth.timestamp || 0);\\n    const tokenValid = tokenAge < (staticData.pdpj_auth.expires_in || 3600) * 1000;\\n    if (tokenValid) {\\n      pdpjToken = staticData.pdpj_auth.access_token;\\n    } else {\\n      throw new Error('Token PDPJ expirado. Execute login PDPJ primeiro.');\\n    }\\n  } else {\\n    throw new Error('Token PDPJ n\\u00e3o encontrado. Execute login PDPJ primeiro.');\\n  }\\n}\\n\\nif (!forceNew) {\\n  if (dbSession && dbSession.cookie_string) {\\n    console.log('\\u2705 Sess\\u00e3o Apoia carregada do banco');\\n    return {\\n      hasValidSession: true,\\n      cookies: dbSession.cookies,\\n      cookieString: dbSession.cookie_string,\\n      expiresAt: parseInt(dbSession.expires_at),\\n      fromCache: false,\\n      source: 'database'\\n    };\\n  }\\n  if (staticData.apoiaSession) {\\n    const sessionAge = Date.now() - (staticData.apoiaSession.timestamp || 0);\\n    const maxAge = 23 * 60 * 60 * 1000;\\n    if (sessionAge < maxAge && staticData.apoiaSession.cookies) {\\n      console.log('\\u2705 Sess\\u00e3o Apoia v\\u00e1lida encontrada');\\n      return {\\n        hasValidSession: true,\\n        cookies: staticData.apoiaSession.cookies,\\n        cookieString: staticData.apoiaSession.cookieString,\\n        expiresAt: staticData.apoiaSession.timestamp + maxAge,\\n        fromCache: true,\\n        source: 'staticData'\\n      };\\n    }\\n  }\\n}\\n\\nconsole.log('\\ud83d\\udd04 Iniciando SSO com Apoia usando token PDPJ');\\nreturn {\\n  hasValidSession: false,\\n  pdpjToken: pdpjToken,\\n  tokenType: staticData.pdpj_auth?.token_type || 'Bearer'\\n};\\n\""
       },
       "id": "bdc92118-f74b-458f-b7a0-2c395588461d",
       "name": "Check Session & Token",
@@ -203,6 +203,54 @@
         280
       ],
       "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM apoia_sessions WHERE expires_at > $1 ORDER BY updated_at DESC LIMIT 1",
+        "options": {
+          "queryReplacement": "={{ Date.now() }}"
+        }
+      },
+      "id": "d5db7bd1-357e-4fe7-89cc-29bd8226cd52",
+      "name": "Load Session DB",
+      "type": "n8n-nodes-base.postgres",
+      "position": [
+        -300,
+        280
+      ],
+      "typeVersion": 2.6,
+      "credentials": {
+        "postgres": {
+          "id": "yaadLkWVMaWfr0vx",
+          "name": "Postgres account Railway"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO apoia_sessions (session_token, cookie_string, expires_at) VALUES ($1,$2,$3) ON CONFLICT (session_token) DO UPDATE SET cookie_string = EXCLUDED.cookie_string, expires_at = EXCLUDED.expires_at, updated_at = CURRENT_TIMESTAMP",
+        "options": {
+          "queryReplacement": "={{ $node['Save Apoia Session'].json.sessionToken }},{{ $node['Save Apoia Session'].json.cookieString }},{{ $node['Save Apoia Session'].json.expiresAt }}"
+        }
+      },
+      "id": "dec70337-3ae9-4a4c-891e-d8b0079962cc",
+      "name": "Save Session to DB",
+      "type": "n8n-nodes-base.postgres",
+      "position": [
+        1800,
+        280
+      ],
+      "typeVersion": 2.6,
+      "credentials": {
+        "postgres": {
+          "id": "yaadLkWVMaWfr0vx",
+          "name": "Postgres account Railway"
+        }
+      }
     }
   ],
   "pinData": {},
@@ -211,7 +259,7 @@
       "main": [
         [
           {
-            "node": "Check Session & Token",
+            "node": "Load Session DB",
             "type": "main",
             "index": 0
           }
@@ -303,6 +351,28 @@
         [
           {
             "node": "Save Apoia Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Session DB": {
+      "main": [
+        [
+          {
+            "node": "Check Session & Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Apoia Session": {
+      "main": [
+        [
+          {
+            "node": "Save Session to DB",
             "type": "main",
             "index": 0
           }

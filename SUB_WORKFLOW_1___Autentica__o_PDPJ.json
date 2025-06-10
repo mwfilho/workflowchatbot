@@ -23,7 +23,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Verificar token existente no staticData\nconst staticData = $getWorkflowStaticData('global');\nconst now = Date.now();\nconst forceNewLogin = $json.forceNewLogin || false;\n\n// Verificar se há token válido\nif (!forceNewLogin && \n    staticData.pdpj_auth && \n    staticData.pdpj_auth.access_token && \n    staticData.pdpj_auth.expires_at > now) {\n    \n    const remainingTime = Math.floor((staticData.pdpj_auth.expires_at - now) / 1000);\n    console.log(`✅ Token válido por mais ${remainingTime} segundos`);\n    \n    return {\n        success: true,\n        tokenValid: true,\n        access_token: staticData.pdpj_auth.access_token,\n        refresh_token: staticData.pdpj_auth.refresh_token,\n        token_type: staticData.pdpj_auth.token_type,\n        expires_in: remainingTime,\n        source: 'cache'\n    };\n}\n\n// Token inválido ou expirado\nconsole.log('🔄 Token expirado ou inexistente. Necessário novo login.');\nreturn {\n    success: false,\n    tokenValid: false,\n    needsLogin: true\n};"
+        "jsCode": "\"// Verificar token existente no staticData\\nconst staticData = $getWorkflowStaticData('global');\\nconst now = Date.now();\\nconst forceNewLogin = $json.forceNewLogin || false;\\n\\nif (!forceNewLogin &&\\n    staticData.pdpj_auth &&\\n    staticData.pdpj_auth.access_token &&\\n    staticData.pdpj_auth.expires_at > now) {\\n  const remainingTime = Math.floor((staticData.pdpj_auth.expires_at - now) / 1000);\\n  console.log(`\\u2705 Token v\\u00e1lido por mais ${remainingTime} segundos`);\\n  return {\\n    success: true,\\n    tokenValid: true,\\n    access_token: staticData.pdpj_auth.access_token,\\n    refresh_token: staticData.pdpj_auth.refresh_token,\\n    token_type: staticData.pdpj_auth.token_type,\\n    expires_in: remainingTime,\\n    source: 'cache'\\n  };\\n}\\n\\nconst refreshToken = staticData.pdpj_auth ? staticData.pdpj_auth.refresh_token : null;\\nconsole.log('\\ud83d\\udd04 Token expirado ou inexistente.');\\nreturn {\\n  success: false,\\n  tokenValid: false,\\n  needsLogin: true,\\n  refresh_token: refreshToken,\\n  token_type: staticData.pdpj_auth?.token_type || 'Bearer'\\n};\\n\""
       },
       "id": "9690ed26-b9e8-4c99-8853-737c8af58579",
       "name": "Check Existing Token",
@@ -345,7 +345,7 @@
         ],
         [
           {
-            "node": "PDPJ OAuth Login",
+            "node": "Refresh Token",
             "type": "main",
             "index": 0
           }
@@ -365,7 +365,13 @@
     },
     "Refresh Token": {
       "main": [
-        []
+        [
+          {
+            "node": "Prepare Token Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Prepare Token Data": {
