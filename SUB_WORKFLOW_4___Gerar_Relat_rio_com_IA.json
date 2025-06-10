@@ -148,6 +148,20 @@
       ],
       "id": "1cd767aa-1ef1-4ab2-883b-994eff2c7773",
       "name": "Get Process Data"
+    },
+    {
+      "parameters": {
+        "mode": "markdownToHtml",
+        "data": "={{ $node[\"Format Final Report\"].json.conteudoMarkdown }}"
+      },
+      "id": "bb5cec6f-3863-412b-b6eb-1d3838522492",
+      "name": "Markdown to HTML",
+      "type": "n8n-nodes-base.markdown",
+      "position": [
+        1080,
+        -40
+      ],
+      "typeVersion": 1
     }
   ],
   "pinData": {},
@@ -206,6 +220,17 @@
         [
           {
             "node": "Prepare AI Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Final Report": {
+      "main": [
+        [
+          {
+            "node": "Markdown to HTML",
             "type": "main",
             "index": 0
           }

@@ -1,0 +1,58 @@
+{
+  "name": "Workflow MCP Server",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "/mcp",
+        "methods": [
+          "POST"
+        ],
+        "port": 5678
+      },
+      "id": "1964a2bb-f357-482d-8142-5a8b40091a21",
+      "name": "MCP Server Trigger",
+      "type": "@n8n/n8n-nodes-langchain.mcptrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "877tHwcTVtW2LnvD"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "schema": []
+        }
+      },
+      "id": "b6855182-ece6-4e60-b0ef-51fa5bd72cda",
+      "name": "Run Main Workflow",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        200,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "MCP Server Trigger": {
+      "main": [
+        [
+          {
+            "node": "Run Main Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false
+}
